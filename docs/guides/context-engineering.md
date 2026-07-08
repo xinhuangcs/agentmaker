@@ -12,8 +12,8 @@ The design principle throughout is explicit allocation rather than passive accum
 competes for the window draws its quota from a single ledger, so no half of the prompt can quietly eat the
 other half.
 
-All symbols on this page are importable from the top level (`from agentbuilder import ContextBuilder`), except
-the trajectory reducers, which live in `agentbuilder.context`.
+All symbols on this page are importable from the top level (`from agentmaker import ContextBuilder`), except
+the trajectory reducers, which live in `agentmaker.context`.
 
 ## The pipeline at a glance
 
@@ -37,7 +37,7 @@ CJK / Western text (each Chinese, Japanese, or Korean character counts as one to
 four characters per token).
 
 ```python
-from agentbuilder import count_tokens
+from agentmaker import count_tokens
 
 count_tokens("hello world")   # 3
 ```
@@ -60,7 +60,7 @@ MMR selects one item at a time, weighing at each step how relevant a candidate i
 what has already been selected.
 
 ```python
-from agentbuilder import mmr_select, RetrievalResult
+from agentmaker import mmr_select, RetrievalResult
 
 candidates = [
     RetrievalResult(content="Cats are great pets.", score=0.9, source="rag", embedding=[1.0, 0.0]),
@@ -105,7 +105,7 @@ Most of the time you do not write a subclass. `CallableSource` adapts any `(quer
 into a source, so `memory.search`, `rag.retrieve`, or your own function can be plugged in directly:
 
 ```python
-from agentbuilder import CallableSource, RetrievalResult
+from agentmaker import CallableSource, RetrievalResult
 
 def search_docs(query: str) -> list[RetrievalResult]:
     return [
@@ -148,7 +148,7 @@ more positional parameters receives `scope` as the second positional argument, o
 RAG-style calls:
 
 ```python
-from agentbuilder import CallableSource, ContextBuilder, ContextConfig, RetrievalResult
+from agentmaker import CallableSource, ContextBuilder, ContextConfig, RetrievalResult
 
 def search_docs(query: str) -> list[RetrievalResult]:
     return [
@@ -259,8 +259,8 @@ ratios that sum past the window.
 Build it with `for_run`, which returns `None` when the window is unknown (the caller then falls back to no cap):
 
 ```python
-from agentbuilder import WindowBudget, WindowBudgetConfig
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import WindowBudget, WindowBudgetConfig
+from agentmaker.testing import ScriptedLLM
 
 llm = ScriptedLLM(context_window=200_000)
 budget = WindowBudget.for_run(llm=llm, cfg=WindowBudgetConfig(), system_tokens=800, tool_tokens=1200)
@@ -295,8 +295,8 @@ verbatim. Recent conversation must stay precise (the model continues answering f
 needs a summary.
 
 ```python
-from agentbuilder import HistoryCompactor, Message
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import HistoryCompactor, Message
+from agentmaker.testing import ScriptedLLM
 
 llm = ScriptedLLM(["The user asked how to get a refund and was told to check Settings > Billing."])
 compactor = HistoryCompactor(llm, keep_recent=2, trigger_tokens=10)
@@ -358,10 +358,10 @@ Complementary to history compaction, the reducer layer trims an agent's own work
 approaches the window budget, dropping the least important signals first while preserving each paradigm's
 lifeline. A generic summary would strip out a reflection loop's past critique points or a plan's exact step
 numbers, which would break the paradigm, so each has its own loss-aware policy. These live in
-`agentbuilder.context`:
+`agentmaker.context`:
 
 ```python
-from agentbuilder.context import reduce_agent, reduce_plan, reduce_reflection, tokens_of, REDUCERS
+from agentmaker.context import reduce_agent, reduce_plan, reduce_reflection, tokens_of, REDUCERS
 ```
 
 - `reduce_agent` trims a unified-loop tool-call trajectory: the most recent atomic units (an assistant message
@@ -389,7 +389,7 @@ can never sum past the window.
 
 ## Configuring it all together
 
-`AgentbuilderConfig` aggregates these sub-configs (`context`, `reducer`, `compaction`, `window_budget`, among
+`AgentmakerConfig` aggregates these sub-configs (`context`, `reducer`, `compaction`, `window_budget`, among
 others) into one holder you set once at your assembly root and pass down. `to_dict` / `from_dict` serialize it,
 and `for_window(context_window)` derives an instance with `context.max_tokens` set from the model window. When a
 builder or compactor is wired into an agent, the retrieval-block and trajectory budgets are supplied by the

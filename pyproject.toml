@@ -1,5 +1,5 @@
 [project]
-name = "agentbuilder"
+name = "agentmaker"
 dynamic = ["version"]
 description = "A general-purpose Python framework for building LLM agents and multi-agent systems, with tools, memory, retrieval / RAG, context engineering, guardrails, human-in-the-loop, and observability."
 readme = "README.md"
@@ -26,7 +26,7 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
-# Optional extras, each imported lazily: pip install "agentbuilder[anthropic]" / [rag] / [all] ...
+# Optional extras, each imported lazily: pip install "agentmaker[anthropic]" / [rag] / [all] ...
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.105.2"]
 gemini = ["google-genai>=2.7.0"]
@@ -36,27 +36,27 @@ search = ["ddgs>=9.0.0", "tavily-python>=0.7.24", "requests>=2.34.2", "serpapi>=
 rag = ["markitdown>=0.1.6"]
 otel = ["opentelemetry-api>=1.42.1", "opentelemetry-sdk>=1.42.1"]
 devtools = ["fastapi>=0.136", "uvicorn[standard]>=0.30"]
-all = ["agentbuilder[anthropic,gemini,rerank,mcp,search,rag,otel,devtools]"]
+all = ["agentmaker[anthropic,gemini,rerank,mcp,search,rag,otel,devtools]"]
 
 [project.urls]
-Homepage = "https://xinhuangcs.github.io/agentbuilder/"
-Documentation = "https://xinhuangcs.github.io/agentbuilder/"
-Repository = "https://github.com/xinhuangcs/agentbuilder"
-Changelog = "https://github.com/xinhuangcs/agentbuilder/blob/main/CHANGELOG.md"
+Homepage = "https://xinhuangcs.github.io/agentmaker/"
+Documentation = "https://xinhuangcs.github.io/agentmaker/"
+Repository = "https://github.com/xinhuangcs/agentmaker"
+Changelog = "https://github.com/xinhuangcs/agentmaker/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = "src/agentbuilder/__init__.py"
+path = "src/agentmaker/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentbuilder"]
+packages = ["src/agentmaker"]
 exclude = ["**/README_zh.md"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["src/agentbuilder", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"]
+only-include = ["src/agentmaker", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"]
 exclude = ["**/README_zh.md"]
 
 [dependency-groups]

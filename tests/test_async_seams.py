@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from agentbuilder.runtime.guardrails import CallableGuardrail, Guardrail, GuardrailResult
-from agentbuilder.runtime.hooks import Hook, afire
+from agentmaker.runtime.guardrails import CallableGuardrail, Guardrail, GuardrailResult
+from agentmaker.runtime.hooks import Hook, afire
 
 
 # ---------- Guardrail: stop rejecting async fns + acheck dual track ----------
@@ -72,9 +72,9 @@ def test_afire_awaits_async_hook_method():
 
 def test_session_store_default_a_double_track():
     """SqliteSessionStore, unmodified, reads and writes consistently across threads via the default aappend_many/aload/aclear."""
-    from agentbuilder.core.message import Message
-    from agentbuilder.retrieval import Scope
-    from agentbuilder.runtime.sessions import SqliteSessionStore
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval import Scope
+    from agentmaker.runtime.sessions import SqliteSessionStore
     s = SqliteSessionStore()
     sc = Scope(user="u")
 
@@ -89,8 +89,8 @@ def test_session_store_default_a_double_track():
 
 def test_checkpoint_store_default_a_double_track():
     """SqliteCheckpointStore, unmodified, reads and writes consistently via the default asave/aload/aclear."""
-    from agentbuilder.retrieval import Scope
-    from agentbuilder.runtime.execution import SqliteCheckpointStore
+    from agentmaker.retrieval import Scope
+    from agentmaker.runtime.execution import SqliteCheckpointStore
     cp = SqliteCheckpointStore()
     sc = Scope(user="u")
 
@@ -106,8 +106,8 @@ def test_checkpoint_store_default_a_double_track():
 
 def test_context_source_afetch_concurrent_and_failloud():
     """Two sync sources run concurrently under abuild_block's gather (wall clock < serial sum); CallableSource's sync fetch fails loud on a coroutine."""
-    from agentbuilder.context import CallableSource, ContextBuilder, ContextConfig
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.context import CallableSource, ContextBuilder, ContextConfig
+    from agentmaker.retrieval.types import RetrievalResult
 
     def slow_fetch(_q):
         time.sleep(0.15)
@@ -130,7 +130,7 @@ def test_context_source_afetch_concurrent_and_failloud():
 
 def test_sqlite_hybrid_aadd_atomic_rollback():
     """If keyword_index write raises during aadd, everything rolls back with no residue in the vector store (cross-index single-transaction atomicity, wrapping the sync atomic version via to_thread)."""
-    from agentbuilder.retrieval import OpenAIEmbedder, Scope, build_sqlite_hybrid
+    from agentmaker.retrieval import OpenAIEmbedder, Scope, build_sqlite_hybrid
 
     class _FakeEmbedder(OpenAIEmbedder):
         def __init__(self): self._dim = 4
@@ -156,7 +156,7 @@ def test_sqlite_hybrid_aadd_atomic_rollback():
 
 def test_sqlite_hybrid_asearch_works():
     """SqliteHybridRetriever's asearch override (whole thing via to_thread) returns normally."""
-    from agentbuilder.retrieval import OpenAIEmbedder, Scope, build_sqlite_hybrid
+    from agentmaker.retrieval import OpenAIEmbedder, Scope, build_sqlite_hybrid
 
     class _FakeEmbedder(OpenAIEmbedder):
         def __init__(self): self._dim = 4

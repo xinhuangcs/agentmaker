@@ -1,4 +1,4 @@
-"""Regression net for agentbuilder.agents / agentbuilder.multi_agent fixes (hermetic: stub LLM / tools, no key, offline).
+"""Regression net for agentmaker.agents / agentmaker.multi_agent fixes (hermetic: stub LLM / tools, no key, offline).
 
 Locks in these fixes:
 ① resume finalization records first, clears the checkpoint after (an output-guardrail trip / persist failure doesn't lose the checkpoint);
@@ -16,22 +16,22 @@ import asyncio
 
 import pytest
 
-from agentbuilder.agents.base import BaseAgent
-from agentbuilder.agents.agent import Agent as UnifiedAgent
-from agentbuilder.agents.workflows import PlanAgent, ReflectionAgent
-from agentbuilder.agents.spec import AgentSpec, _turns, build_agent
-from agentbuilder.core.exceptions import GuardrailTripwireError, RunLimitExceeded, SessionError
-from agentbuilder.core.llm_clients import LLMClient
-from agentbuilder.core.llm_response import LLMResponse
-from agentbuilder.runtime.execution import CheckpointStore, ExecutionState, RunPolicy
-from agentbuilder.runtime.harness import Harness
-from agentbuilder.runtime.execution.run_context import new_run_id, reset_run, start_run
-from agentbuilder.runtime.hitl import Interrupt, Interrupt as _Interrupt, PendingAction, PendingAction as _PendingAction
-from agentbuilder.agents.multi_agent import AgentTool
-from agentbuilder.retrieval import Scope
-from agentbuilder.tools import CalculatorTool, ToolRegistry
-from agentbuilder.tools.base import Tool, ToolParameter
-from agentbuilder.tools.response import ToolResponse
+from agentmaker.agents.base import BaseAgent
+from agentmaker.agents.agent import Agent as UnifiedAgent
+from agentmaker.agents.workflows import PlanAgent, ReflectionAgent
+from agentmaker.agents.spec import AgentSpec, _turns, build_agent
+from agentmaker.core.exceptions import GuardrailTripwireError, RunLimitExceeded, SessionError
+from agentmaker.core.llm_clients import LLMClient
+from agentmaker.core.llm_response import LLMResponse
+from agentmaker.runtime.execution import CheckpointStore, ExecutionState, RunPolicy
+from agentmaker.runtime.harness import Harness
+from agentmaker.runtime.execution.run_context import new_run_id, reset_run, start_run
+from agentmaker.runtime.hitl import Interrupt, Interrupt as _Interrupt, PendingAction, PendingAction as _PendingAction
+from agentmaker.agents.multi_agent import AgentTool
+from agentmaker.retrieval import Scope
+from agentmaker.tools import CalculatorTool, ToolRegistry
+from agentmaker.tools.base import Tool, ToolParameter
+from agentmaker.tools.response import ToolResponse
 
 
 # ---------- Test doubles (offline, no key needed) ----------
@@ -212,7 +212,7 @@ def test_harness_rejects_non_registry_tool_registry():
 def test_resolve_llm_provider_model(monkeypatch):
     """AgentSpec.model accepts 'provider:model': splits provider + model; a bare provider name still works; illegal types fail loud."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")                  # LLMClient construction validates the key; inject a fake key under hermetic
-    from agentbuilder.agents.spec import _resolve_llm
+    from agentmaker.agents.spec import _resolve_llm
     a = _resolve_llm("deepseek:deepseek-v4-pro")
     assert a.provider == "deepseek" and a.model == "deepseek-v4-pro"
     b = _resolve_llm("deepseek")                                  # bare provider name -> default model
@@ -233,7 +233,7 @@ def test_build_agent_with_provider_model_string(monkeypatch):
 
 def test_unknown_provider_error_hints_provider_model_format():
     """An unknown provider errors with a hint about the 'provider:model' format (guidance for new users passing a model name)."""
-    from agentbuilder.core.exceptions import LLMConfigError
+    from agentmaker.core.exceptions import LLMConfigError
     with pytest.raises(LLMConfigError) as e:
         LLMClient("gpt-5")
     assert "provider:model" in str(e.value)
@@ -429,7 +429,7 @@ class _StreamLLM:
 def test_harness_stream_counts_call_even_when_consumer_breaks_early():
     """When the consumer closes the stream early, record_llm still counts in finally - otherwise the RunPolicy limit could be bypassed repeatedly.
     The harness is fully async: aio.iter_sync synchronously drives astream_llm (the real facade path for sync consumption)."""
-    from agentbuilder.core.aio import iter_sync
+    from agentmaker.core.aio import iter_sync
     h = Harness(_StreamLLM())
     policy = RunPolicy(max_llm_calls=1)
     tok = start_run("rid", policy=policy)
@@ -591,8 +591,8 @@ def test_build_agent_accepts_injection_and_tools_on_all_paradigms():
 
 def _tool_rag_registry():
     """A registry of three fake tools (shared by the Tool-RAG tests)."""
-    from agentbuilder.tools.base import ToolParameter
-    from agentbuilder.tools.registry import ToolRegistry
+    from agentmaker.tools.base import ToolParameter
+    from agentmaker.tools.registry import ToolRegistry
     reg = ToolRegistry()
     for name, desc in [("calc", "算数"), ("mail", "发邮件"), ("ask_user", "向用户提问澄清")]:
         reg.register_function(lambda p: "ok", name, desc, [ToolParameter("x", "string", "参数")])
@@ -613,7 +613,7 @@ class _HitsRetriever:
 
 def test_tool_retriever_always_include_and_on_empty():
     """always_include stays pinned first; zero hits defaults to falling back to the full catalog (never zero tools); on_empty can switch the strategy."""
-    from agentbuilder.tools.tool_retriever import ToolRetriever
+    from agentmaker.tools.tool_retriever import ToolRetriever
     reg = _tool_rag_registry()
     tr = ToolRetriever(reg, _HitsRetriever(["calc"]), always_include=("ask_user",))
     assert tr.retrieve("算一下") == ["ask_user", "calc"]            # pinned first + hits following
@@ -629,17 +629,17 @@ def test_tool_retriever_always_include_and_on_empty():
 
 def test_tool_retriever_selector_seam():
     """selector truncation seam: once injected, the callback decides which hits to take (e.g. a score threshold); the default remains a fixed top-k."""
-    from agentbuilder.tools.tool_retriever import ToolRetriever
+    from agentmaker.tools.tool_retriever import ToolRetriever
     reg = _tool_rag_registry()
     tr = ToolRetriever(reg, _HitsRetriever(["calc", "mail"]), selector=lambda q, hits: [hits[0].id])
     assert tr.retrieve("发邮件并算账") == ["calc"]                   # the callback only lets the top hit through
 
 
-def test_tool_retrieval_config_in_agentbuilder_config():
-    """ToolRetrievalConfig as AgentbuilderConfig's 9th sub-config: from_dict restore + from_config assembly."""
-    from agentbuilder import AgentbuilderConfig, ToolRetrievalConfig
-    from agentbuilder.tools.tool_retriever import ToolRetriever
-    kc = AgentbuilderConfig.from_dict({"tool_retrieval": {"top_k": 3, "always_include": ["ask_user"], "on_empty": "none"}})
+def test_tool_retrieval_config_in_agentmaker_config():
+    """ToolRetrievalConfig as AgentmakerConfig's 9th sub-config: from_dict restore + from_config assembly."""
+    from agentmaker import AgentmakerConfig, ToolRetrievalConfig
+    from agentmaker.tools.tool_retriever import ToolRetriever
+    kc = AgentmakerConfig.from_dict({"tool_retrieval": {"top_k": 3, "always_include": ["ask_user"], "on_empty": "none"}})
     assert kc.tool_retrieval == ToolRetrievalConfig(top_k=3, always_include=("ask_user",), on_empty="none")
     tr = ToolRetriever.from_config(kc, _tool_rag_registry(), _HitsRetriever(["calc"]))
     assert tr.top_k == 3 and tr.always_include == ("ask_user",) and tr.on_empty == "none"
@@ -647,7 +647,7 @@ def test_tool_retrieval_config_in_agentbuilder_config():
 
 def test_tool_search_tool_returns_discovered():
     """ToolSearchTool: returns catalog text + data.discovered tool names (excluding itself)."""
-    from agentbuilder.tools.tool_retriever import ToolRetriever, ToolSearchTool
+    from agentmaker.tools.tool_retriever import ToolRetriever, ToolSearchTool
     reg = _tool_rag_registry()
     tr = ToolRetriever(reg, _HitsRetriever(["mail", "calc"]))
     tool = ToolSearchTool(tr, top_k=2)
@@ -658,10 +658,10 @@ def test_tool_search_tool_returns_discovered():
 
 def test_fc_loop_expands_tools_from_discovery():
     """Mid-run expansion of the available set on the fc path: after tool_search discovers a new tool, the next LLM call's tools include its schema."""
-    from agentbuilder.tools.base import ToolParameter
-    from agentbuilder.tools.registry import ToolRegistry
-    from agentbuilder.tools.response import ToolResponse
-    from agentbuilder.tools.base import Tool
+    from agentmaker.tools.base import ToolParameter
+    from agentmaker.tools.registry import ToolRegistry
+    from agentmaker.tools.response import ToolResponse
+    from agentmaker.tools.base import Tool
 
     class _Searcher(Tool):
         def __init__(self):
@@ -699,9 +699,9 @@ def test_fc_loop_expands_tools_from_discovery():
 
 def test_discovered_tools_survive_hitl_resume():
     """The discovered list is persisted with the checkpoint: turn1 discovers -> turn2 suspends on a high-risk tool -> after resume the model still sees the discovered tools' schemas."""
-    from agentbuilder.tools.base import Tool, ToolParameter
-    from agentbuilder.tools.registry import ToolRegistry
-    from agentbuilder.tools.response import ToolResponse
+    from agentmaker.tools.base import Tool, ToolParameter
+    from agentmaker.tools.registry import ToolRegistry
+    from agentmaker.tools.response import ToolResponse
 
     class _Searcher(Tool):
         def __init__(self):
@@ -757,7 +757,7 @@ class _NoFcLLM:
 
 def test_agent_with_tools_rejects_no_fc_model():
     """Tools present + a model that declares no fc support -> fail loud at construction (rather than tools silently failing at runtime)."""
-    from agentbuilder.tools import ToolRegistry
+    from agentmaker.tools import ToolRegistry
     reg = ToolRegistry()
     reg.register_function(lambda p: "ok", "noop", "无操作工具")
     with pytest.raises(ValueError, match="function calling"):
@@ -798,7 +798,7 @@ def test_init_subclass_requires_run_or_arun():
 
 def test_derive_scope_suffix_and_none_fallback():
     """_derive_scope: appends "::"+suffix to the agent dimension (byte-for-byte identical to the old _exec_scope/_crit_scope); None falls back to an empty Scope."""
-    from agentbuilder.retrieval import Scope
+    from agentmaker.retrieval import Scope
     assert BaseAgent._derive_scope(Scope(agent="A"), "plan_exec").agent == "A::plan_exec"
     assert BaseAgent._derive_scope(None, "reflect_crit").agent == "::reflect_crit"
 
@@ -827,7 +827,7 @@ def test_child_decision_none_when_missing():
 def test_absorb_child_order_contract():
     """_absorb_child completion-branch ordering contract: awaiting is reset first -> on_complete records -> parent _checkpoint -> child cleanup
     ("parent commit before child cleanup"); suspend branch: awaiting=True + repackaged as a parent-scope Interrupt (doesn't leak the child scope)."""
-    from agentbuilder.retrieval import Scope
+    from agentmaker.retrieval import Scope
 
     events = []
 
@@ -856,7 +856,7 @@ def test_absorb_child_order_contract():
     def on_complete(r):
         events.append(("record", r, st.meta["awaiting"]))        # awaiting must already be reset to False when recording
 
-    from agentbuilder.agents.result import RunResult
+    from agentmaker.agents.result import RunResult
     # _absorb_child now consumes the child's RunResult (on_complete gets final_output)
     assert asyncio.run(p._absorb_child(RunResult(final_output="结果", status="completed"), st, parent_scope,
                                        child=_Child(), child_scope=child_scope, on_complete=on_complete)) is None
@@ -872,7 +872,7 @@ def test_absorb_child_order_contract():
     assert st.meta["awaiting"] is True
 
 
-# ---------- Unified-loop Agent (agentbuilder/agents/agent.py) ----------
+# ---------- Unified-loop Agent (agentmaker/agents/agent.py) ----------
 
 
 def test_unified_agent_plain_chat_and_history():
@@ -885,7 +885,7 @@ def test_unified_agent_plain_chat_and_history():
 def test_run_result_envelope_fields():
     """RunResult envelope: the completed state has final_output/status/new_messages/run_id/usage all present, and __str__ equals the final output text;
     the suspended state has interrupted=True + an interrupt field, and __str__ isn't a bare None."""
-    from agentbuilder import RunResult
+    from agentmaker import RunResult
     a = UnifiedAgent("u", ScriptLLM(["你好！"]))
     r = a.run("hi")
     assert isinstance(r, RunResult) and r.status == "completed" and r.interrupted is False
@@ -982,7 +982,7 @@ def test_resume_rejects_non_bool_decision():
 
 def test_approval_gate_requires_explicit_true():
     """Approval-gate defense in depth: a truthy-but-not-True value in the decision table (dirty data that bypassed the type check) does not release the high-risk action; it re-suspends."""
-    from agentbuilder.runtime.hitl import ApprovalRequired
+    from agentmaker.runtime.hitl import ApprovalRequired
     h = Harness(ScriptLLM([]), tool_registry=_reg(DangerTool()))
     with pytest.raises(ApprovalRequired):
         h._approval_gate("danger", {"x": "f"}, "c1", {"c1": "approved"})   # truthy but not True -> re-suspend
@@ -1040,7 +1040,7 @@ def test_unified_agent_stream_history_semantics():
 
 def test_unified_agent_stream_run_context_carries_scope():
     """The streaming run context carries scope (fixes the old ChatStrategy.stream_run drift of not passing scope)."""
-    from agentbuilder.runtime.execution.run_context import current_scope
+    from agentmaker.runtime.execution.run_context import current_scope
     seen = {}
 
     class _SLLM:
@@ -1130,9 +1130,9 @@ def test_unified_agent_checkpoint_json_roundtrip_resume():
 
 def test_reflection_passed_uses_word_boundary():
     """The pass signal uses word-boundary matching: appearing as part of a longer word (e.g. GOOD ENOUGH within GOOD ENOUGHNESS) is no longer misjudged as passing."""
-    from agentbuilder.agents.workflows.reflection import ReflectionAgent
-    from agentbuilder.prompts import DEFAULT_PROMPTS
-    from agentbuilder.prompts.packs import chinese_registry
+    from agentmaker.agents.workflows.reflection import ReflectionAgent
+    from agentmaker.prompts import DEFAULT_PROMPTS
+    from agentmaker.prompts.packs import chinese_registry
 
     class _FakeSelf:
         pass
@@ -1164,7 +1164,7 @@ def test_child_agents_default_on_pending_discard():
 
 def test_plan_clear_checkpoint_cascades_to_executor():
     """A Plan step suspends -> clear_checkpoint(scope) cascades to clear the child executor's checkpoint -> a subsequent run doesn't hit SessionError and can re-run."""
-    from agentbuilder.core.aio import run_sync
+    from agentmaker.core.aio import run_sync
     reg = ToolRegistry()
     reg.register(DangerTool())
     cp = MemCheckpoint()
@@ -1393,7 +1393,7 @@ def test_resume_no_duplicate_history_on_crash_between_record_and_clear():
 def test_concurrent_same_scope_run_serialized():
     """Two concurrent runs on the same scope both suspend -> the per-scope lock serializes them: one suspends, the other hits _guard_pending and raises SessionError, and the suspended state isn't overwritten."""
     import asyncio as _aio
-    from agentbuilder.core.aio import run_sync
+    from agentmaker.core.aio import run_sync
 
     class AlwaysDanger:
         provider = "stub"
@@ -1473,7 +1473,7 @@ def test_stream_buffer_mode_passes_through_when_ok():
 
 def test_invalid_tool_args_emits_trace():
     """A tool-argument parse failure (invalid JSON) still emits a tool_call trace (status=invalid_args) - the audit sees this invalid call."""
-    from agentbuilder.runtime.observability.tracer import Tracer
+    from agentmaker.runtime.observability.tracer import Tracer
     tracer = Tracer()
     reg = ToolRegistry()
     reg.register(CalculatorTool())

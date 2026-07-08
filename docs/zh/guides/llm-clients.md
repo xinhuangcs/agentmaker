@@ -5,7 +5,7 @@
 当你需要直接、原始地访问模型时，就用 `LLMClient`。而当你构建一个 [Agent](agents.md) 时，通常是把一个 `LLMClient` 交给它（或让 `AgentSpec` 从一个 `"provider:model"` 字符串来构造），你自己不会去调用 `chat()`。
 
 ```python
-from agentbuilder import LLMClient
+from agentmaker import LLMClient
 
 llm = LLMClient("deepseek")                       # provider's default model (deepseek-v4-flash)
 resp = await llm.chat([{"role": "user", "content": "Hello"}])
@@ -13,7 +13,7 @@ print(resp.content)
 ```
 
 !!! note
-    `chat()` 和 `stream()` 都是协程（coroutine）：框架从内核起就是异步的。请在事件循环里用 `await` 运行它们，或者通过 `agentbuilder.core.aio` 里的门面（facade）从同步代码调用（`run_sync(llm.chat(...))` / `iter_sync(llm.stream(...))`）。
+    `chat()` 和 `stream()` 都是协程（coroutine）：框架从内核起就是异步的。请在事件循环里用 `await` 运行它们，或者通过 `agentmaker.core.aio` 里的门面（facade）从同步代码调用（`run_sync(llm.chat(...))` / `iter_sync(llm.stream(...))`）。
 
 ## 选择厂商与模型
 
@@ -120,8 +120,8 @@ print(resp.usage, resp.finish_reason)
 ```python
 import asyncio
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 async def main():
@@ -202,8 +202,8 @@ print(resp)                  # same thing: __str__ returns content
 ```python
 from pydantic import BaseModel
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 class Person(BaseModel):
@@ -223,7 +223,7 @@ print(f"{type(person).__name__}(name={person.name!r}, age={person.age})")
 一条消息的 `content` 要么是纯字符串（常见情形），要么是一组厂商中立的内容片段（content part）列表。`Message` dataclass 用 `role`、`content`、`timestamp` 以及一个 `metadata` 字典来建模一条消息；调用 `to_dict()` 即可得到 `chat()` 和 `stream()` 所消费的 `{"role", "content"}` 形态。
 
 ```python
-from agentbuilder import Message
+from agentmaker import Message
 
 msg = Message(content="Hello", role="user")
 await llm.chat([msg.to_dict()])
@@ -237,7 +237,7 @@ await llm.chat([msg.to_dict()])
 - `image_part_from_url(url)` 引用一张由厂商去抓取的远程图像。
 
 ```python
-from agentbuilder import LLMClient, text_part, image_part_from_file
+from agentmaker import LLMClient, text_part, image_part_from_file
 
 llm = LLMClient("openai")
 messages = [{
@@ -261,7 +261,7 @@ resp = await llm.chat(messages)
 你不必修改框架就能新增一个厂商。传入一个 `ProviderProfile` 即可复用现有协议，无需改动源码：
 
 ```python
-from agentbuilder import LLMClient, ProviderProfile
+from agentmaker import LLMClient, ProviderProfile
 
 llm = LLMClient(
     provider="myvendor",
@@ -273,7 +273,7 @@ llm = LLMClient(
 若要接入一个全新的通信协议，请以某个协议名注册一个适配器类（`BaseAdapter` 的子类），然后在 profile 里引用该协议名：
 
 ```python
-from agentbuilder.core.adapters import register_adapter
+from agentmaker.core.adapters import register_adapter
 
 register_adapter("myproto", MyAdapter)   # MyAdapter is your BaseAdapter subclass
 LLMClient("myvendor", profile=ProviderProfile(protocol="myproto", default_model="m", key_envs=("MYVENDOR_API_KEY",)))

@@ -3,9 +3,9 @@ import asyncio
 
 import pytest
 
-from agentbuilder import Agent, CalculatorTool, LLMClient
-from agentbuilder.core.adapters.tool_emulation import ToolEmulationAdapter
-from agentbuilder.core.llm_response import LLMResponse
+from agentmaker import Agent, CalculatorTool, LLMClient
+from agentmaker.core.adapters.tool_emulation import ToolEmulationAdapter
+from agentmaker.core.llm_response import LLMResponse
 
 
 class _FakeDelegate:

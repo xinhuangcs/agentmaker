@@ -1,7 +1,7 @@
 # 安装
 
 ```bash
-pip install agentbuilder
+pip install agentmaker
 ```
 
 需要 **Python 3.12+**。
@@ -22,9 +22,9 @@ pip install agentbuilder
 只安装你需要的能力。每个后端都是惰性导入的，因此未安装的附加项在导入时不会产生任何开销。
 
 ```bash
-pip install "agentbuilder[anthropic]"        # one extra
-pip install "agentbuilder[anthropic,rag]"    # several
-pip install "agentbuilder[all]"              # everything below
+pip install "agentmaker[anthropic]"        # one extra
+pip install "agentmaker[anthropic,rag]"    # several
+pip install "agentmaker[all]"              # everything below
 ```
 
 | 附加项 | 新增能力 |
@@ -60,6 +60,6 @@ pip install "agentbuilder[all]"              # everything below
 如果你使用 [uv](https://docs.astral.sh/uv/)：
 
 ```bash
-uv add agentbuilder
-uv add "agentbuilder[all]"
+uv add agentmaker
+uv add "agentmaker[all]"
 ```

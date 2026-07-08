@@ -1,6 +1,6 @@
 # Retrieval & RAG
 
-agentbuilder ships two layers for finding relevant text and grounding an LLM in it. The lower layer is a **retrieval foundation**: a hybrid retriever that runs dense (vector) search and sparse (keyword) search side by side, fuses the two rankings, and optionally reranks the result. The upper layer is **RAG** (Retrieval-Augmented Generation: retrieve supporting passages, then let the model answer using only those passages): it reads files into documents, splits them into chunks, ingests them, and answers questions with citations. The same foundation is shared by [Memory](memory.md), so both subsystems get the same search and the same data isolation.
+agentmaker ships two layers for finding relevant text and grounding an LLM in it. The lower layer is a **retrieval foundation**: a hybrid retriever that runs dense (vector) search and sparse (keyword) search side by side, fuses the two rankings, and optionally reranks the result. The upper layer is **RAG** (Retrieval-Augmented Generation: retrieve supporting passages, then let the model answer using only those passages): it reads files into documents, splits them into chunks, ingests them, and answers questions with citations. The same foundation is shared by [Memory](memory.md), so both subsystems get the same search and the same data isolation.
 
 Reach for the retrieval foundation when you want raw search over your own text; reach for RAG when you want a document knowledge base with grounded, sourced answers.
 
@@ -8,17 +8,17 @@ Reach for the retrieval foundation when you want raw search over your own text; 
 
 | Layer | Package | You get |
 | --- | --- | --- |
-| Retrieval foundation | `agentbuilder.retrieval` | `HybridRetriever`, the abstract ports (`Embedder`, `VectorStore`, `KeywordIndex`, `Reranker`, `FusionStrategy`) and their batteries, `reciprocal_rank_fusion`, `Scope`, `MetadataFilter`, `RetrievalResult`, `IndexSync` |
-| RAG | `agentbuilder.rag` | `Document` / `Chunk`, `split_document`, `IngestionPipeline`, `RagRetriever`, `Contextualizer`, `MultiQueryExpander` / `HyDETransformer`, `NeighborWindowExpander`, `RAGTool`, `AskResult` / `SourceRef` |
+| Retrieval foundation | `agentmaker.retrieval` | `HybridRetriever`, the abstract ports (`Embedder`, `VectorStore`, `KeywordIndex`, `Reranker`, `FusionStrategy`) and their batteries, `reciprocal_rank_fusion`, `Scope`, `MetadataFilter`, `RetrievalResult`, `IndexSync` |
+| RAG | `agentmaker.rag` | `Document` / `Chunk`, `split_document`, `IngestionPipeline`, `RagRetriever`, `Contextualizer`, `MultiQueryExpander` / `HyDETransformer`, `NeighborWindowExpander`, `RAGTool`, `AskResult` / `SourceRef` |
 
 ## Quickstart: ingest and retrieve
 
-This is [`examples/05_rag.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/05_rag.py), verbatim. It runs with no API key and no network: `FakeEmbedder` stands in for a real embedding model and the local SQLite backend holds the index.
+This is [`examples/05_rag.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/05_rag.py), verbatim. It runs with no API key and no network: `FakeEmbedder` stands in for a real embedding model and the local SQLite backend holds the index.
 
 ```python
-from agentbuilder import IngestionPipeline, RagRetriever, SourceStore
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder, ScriptedLLM
+from agentmaker import IngestionPipeline, RagRetriever, SourceStore
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder, ScriptedLLM
 
 retriever = build_sqlite_hybrid(FakeEmbedder())
 source_store = SourceStore()
@@ -56,14 +56,14 @@ The foundation follows a ports-and-adapters design: five abstract base classes d
 | `Reranker` | Re-order candidates with a cross-encoder (a model that scores a query and passage together, more precise than vectors) | `CohereReranker` |
 | `FusionStrategy` | Merge several ranked lists into one | `RRFFusion` |
 
-All five ports and all five batteries are exported from the package top level, for example `from agentbuilder import HybridRetriever, OpenAIEmbedder, SqliteVecStore`.
+All five ports and all five batteries are exported from the package top level, for example `from agentmaker import HybridRetriever, OpenAIEmbedder, SqliteVecStore`.
 
 ### HybridRetriever
 
 `HybridRetriever` is the storage-agnostic orchestrator. Construct it from an embedder, a vector store, and a keyword index, with an optional reranker and fusion strategy:
 
 ```python
-from agentbuilder import HybridRetriever
+from agentmaker import HybridRetriever
 ```
 
 ```python
@@ -92,7 +92,7 @@ RRF is the default way the two retrieval paths are combined. It looks only at ea
 You can call the function directly on any set of ranked lists:
 
 ```python
-from agentbuilder import RetrievalResult, reciprocal_rank_fusion
+from agentmaker import RetrievalResult, reciprocal_rank_fusion
 
 dense = [RetrievalResult(content="A", score=0.91, source="rag", id="1"),
          RetrievalResult(content="B", score=0.83, source="rag", id="2")]
@@ -124,7 +124,7 @@ Every query in the foundation (and in RAG and Memory above it) returns a list of
 `Scope` is a frozen dataclass that labels every piece of data by ownership across five dimensions: `base`, `user`, `agent`, `session`, and `app`. One shared foundation can hold many tenants' data without cross-contamination.
 
 ```python
-from agentbuilder import Scope
+from agentmaker import Scope
 
 Scope(base="rag", user="alice")
 ```
@@ -138,7 +138,7 @@ A fully empty `Scope()` restricts nothing, so a bare delete or search would hit 
 `MetadataFilter` narrows candidates by structured fields before similarity is computed (pre-filtering). Conditions are AND'd, and the only operators are `eq` (equality) and `in` (one of several):
 
 ```python
-from agentbuilder import MetadataFilter
+from agentmaker import MetadataFilter
 
 MetadataFilter("doc_id", "abc123")                    # doc_id = 'abc123'
 MetadataFilter("tag", ["faq", "policy"], op="in")     # tag in ('faq', 'policy')
@@ -151,7 +151,7 @@ Filterable fields must be declared when you build the index, via `build_sqlite_h
 `RetrievalConfig` holds the tunable knobs, validated at construction:
 
 ```python
-from agentbuilder import RetrievalConfig
+from agentmaker import RetrievalConfig
 
 RetrievalConfig(top_k=5, candidate_pool=20, rrf_k=60)   # the defaults
 ```
@@ -179,7 +179,7 @@ Key `Document` fields: `content`, `doc_id` (auto-generated if omitted), `title`,
 `split_document` picks a splitter from `doc.format` and returns a list of chunks. Markdown is split by heading level (preserving the heading path), structured data (`json` / `jsonl` / `csv`) is split by record, and everything else is split by token count with overlap. A short document that fits within one chunk is never split.
 
 ```python
-from agentbuilder import Document, split_document
+from agentmaker import Document, split_document
 
 doc = Document(content="# Title\n\nSome body text.", format="md")
 chunks = split_document(doc, chunk_tokens=512, overlap_tokens=64)
@@ -216,7 +216,7 @@ Two batteries:
 - `LLMContextualizer` asks an LLM to write one sentence of context per chunk (stronger, but one LLM call per chunk).
 
 ```python
-from agentbuilder import IngestionPipeline, HeadingContextualizer
+from agentmaker import IngestionPipeline, HeadingContextualizer
 
 pipeline = IngestionPipeline(
     retriever=retriever, source_store=source_store,
@@ -238,8 +238,8 @@ for hit in rag.retrieve("how much for meals?", top_k=2, filters=None):
 
 ```python
 import asyncio
-from agentbuilder import RagRetriever
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import RagRetriever
+from agentmaker.testing import ScriptedLLM
 
 rag = RagRetriever(retriever, source_store, ScriptedLLM(["The meal allowance is 80."]))
 
@@ -262,7 +262,7 @@ The user's wording often does not match the document's wording. A `QueryTransfor
 - `HyDETransformer` (HyDE, hypothetical document embeddings) has the LLM draft a hypothetical answer and searches with that, since answer-shaped text matches answer chunks more precisely than the question does.
 
 ```python
-from agentbuilder import RagRetriever, MultiQueryExpander
+from agentmaker import RagRetriever, MultiQueryExpander
 
 rag = RagRetriever(retriever, source_store, llm,
                    query_transformer=MultiQueryExpander(llm, n=3))
@@ -275,7 +275,7 @@ On LLM failure a transform falls back to the original query rather than raising.
 Small chunks retrieve precisely but can be too thin for the model to answer well. The "small-to-big" pattern retrieves with small chunks, then expands each hit into a fuller context before handing it to the LLM. `NeighborWindowExpander` merges each hit with the chunks immediately before and after it (same document, ordered by `index`), deduplicating so overlapping windows are not counted twice. It is off by default; enable it with `expander=`:
 
 ```python
-from agentbuilder import RagRetriever, NeighborWindowExpander
+from agentmaker import RagRetriever, NeighborWindowExpander
 
 rag = RagRetriever(retriever, source_store, llm,
                    expander=NeighborWindowExpander(window=1))
@@ -288,7 +288,7 @@ rag = RagRetriever(retriever, source_store, llm,
 `RAGTool` wraps ingestion and retrieval as a [Tool](tools.md) so an Agent can manage a knowledge base and answer from it. It exposes the actions `add_text`, `add_document`, `search`, `ask`, and `stats`.
 
 ```python
-from agentbuilder import RAGTool
+from agentmaker import RAGTool
 
 rag_tool = RAGTool(pipeline, rag, top_k=5)
 ```

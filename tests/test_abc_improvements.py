@@ -9,13 +9,13 @@ import json
 
 import pytest
 
-import agentbuilder.core.trace_events as ev
-from agentbuilder import (Agent, Harness, Message, OTelExporter, Scope, ScopeSummary,
+import agentmaker.core.trace_events as ev
+from agentmaker import (Agent, Harness, Message, OTelExporter, Scope, ScopeSummary,
                           SqliteSessionStore, Tool, ToolParameter, ToolRegistry, ToolResponse,
                           Tracer, current_trace_carrier)
-from agentbuilder.core.llm_response import LLMResponse
-from agentbuilder.runtime.execution import new_run_id, reset_run, start_run
-from agentbuilder.testing import ScriptedLLM
+from agentmaker.core.llm_response import LLMResponse
+from agentmaker.runtime.execution import new_run_id, reset_run, start_run
+from agentmaker.testing import ScriptedLLM
 
 
 # ========== ① History compaction emits EVENT_CONTEXT_COMPACT ==========
@@ -75,7 +75,7 @@ def test_gemini_configures_default_retry(monkeypatch):
     pytest.importorskip("google.genai")
     import google.genai as genai
 
-    from agentbuilder.core.adapters.gemini import _DEFAULT_RETRY_ATTEMPTS, GeminiAdapter
+    from agentmaker.core.adapters.gemini import _DEFAULT_RETRY_ATTEMPTS, GeminiAdapter
 
     captured = {}
     monkeypatch.setattr(genai, "Client",
@@ -96,7 +96,7 @@ def test_gemini_configures_default_retry(monkeypatch):
 
 def test_mcp_stdio_and_http_construction():
     pytest.importorskip("mcp")
-    from agentbuilder.tools.integrations.mcp import MCPClient
+    from agentmaker.tools.integrations.mcp import MCPClient
     stdio = MCPClient(command="python", args=["s.py"], namespace="a")
     assert stdio.url is None and stdio.command == "python"
     http = MCPClient(url="https://x/mcp", namespace="a", headers={"k": "v"}, auth=None)
@@ -111,7 +111,7 @@ def test_mcp_stdio_and_http_construction():
 ])
 def test_mcp_transport_mutual_exclusion(bad):
     pytest.importorskip("mcp")
-    from agentbuilder.tools.integrations.mcp import MCPClient
+    from agentmaker.tools.integrations.mcp import MCPClient
     with pytest.raises(ValueError):
         MCPClient(**bad)
 
@@ -136,7 +136,7 @@ def test_otel_exporter_accepts_carrier_provider():
 
 
 def test_run_api_accepts_trace_carrier():
-    from agentbuilder.agents.base import BaseAgent
+    from agentmaker.agents.base import BaseAgent
     for method in ("arun", "run", "aresume", "resume"):
         assert "trace_carrier" in inspect.signature(getattr(BaseAgent, method)).parameters
 
@@ -174,7 +174,7 @@ def test_list_scopes_rejects_unknown_dimension():
 
 
 def test_list_scopes_unsupported_backend_raises():
-    from agentbuilder.runtime.sessions import SessionStore
+    from agentmaker.runtime.sessions import SessionStore
 
     class _Bare(SessionStore):
         def append(self, message, *, scope=None): ...
@@ -277,7 +277,7 @@ def test_high_risk_tool_never_parallelized():
 
 
 def test_supports_parallel_flag_propagates_through_callable_paths():
-    from agentbuilder import tool
+    from agentmaker import tool
 
     @tool(supports_parallel=True)
     def lookup(city: str) -> str:

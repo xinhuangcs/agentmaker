@@ -10,9 +10,9 @@ from typing import Annotated, Optional
 
 import pytest
 
-from agentbuilder import Tool, ToolRegistry, tool
-from agentbuilder.core.exceptions import ToolRegistrationError
-from agentbuilder.prompts import DEFAULT_PROMPTS
+from agentmaker import Tool, ToolRegistry, tool
+from agentmaker.core.exceptions import ToolRegistrationError
+from agentmaker.prompts import DEFAULT_PROMPTS
 
 
 class _StubLLM:
@@ -184,7 +184,7 @@ def test_from_callable_and_register_callable():
 
 def test_register_function_legacy_path_unchanged():
     """register_function's legacy contract (function receives the whole dict, hand-written parameter list) is unchanged (backward compatible)."""
-    from agentbuilder import ToolParameter
+    from agentmaker import ToolParameter
     reg = ToolRegistry()
     reg.register_function(lambda p: p["city"] + "晴", "weather", "查天气",
                           [ToolParameter("city", "string", "城市名")])
@@ -195,8 +195,8 @@ def test_register_function_legacy_path_unchanged():
 
 def test_agent_accepts_tools_list():
     """Agent(tools=[...]) accepts a list of Tools (including @tool-decorated objects), normalizes to a registry, and can execute."""
-    from agentbuilder import CalculatorTool
-    from agentbuilder.agents.agent import Agent
+    from agentmaker import CalculatorTool
+    from agentmaker.agents.agent import Agent
 
     @tool
     def echo(text: str) -> str:
@@ -208,8 +208,8 @@ def test_agent_accepts_tools_list():
 
 def test_agent_tools_registry_inherits_agent_prompts():
     """Agent(tools=[...])'s internal registry inherits the agent's prompts: registry-level errors (unknown tool, etc.) match the agent's language."""
-    from agentbuilder import CalculatorTool
-    from agentbuilder.agents.agent import Agent
+    from agentmaker import CalculatorTool
+    from agentmaker.agents.agent import Agent
     reg_prompts = DEFAULT_PROMPTS.copy()
     a = Agent("a", _StubLLM(), tools=[CalculatorTool()], prompts=reg_prompts)
     assert a.tool_registry.prompts is a.prompts
@@ -217,7 +217,7 @@ def test_agent_tools_registry_inherits_agent_prompts():
 
 def test_agent_tools_and_tool_registry_mutually_exclusive():
     """Passing both tools= and tool_registry= -> ValueError."""
-    from agentbuilder.agents.agent import Agent
+    from agentmaker.agents.agent import Agent
 
     @tool
     def echo(text: str) -> str:
@@ -228,8 +228,8 @@ def test_agent_tools_and_tool_registry_mutually_exclusive():
 
 def test_agent_tools_equiv_to_spec_tools():
     """Agent(tools=[...]) and AgentSpec(tools=[...]) produce the same tool set through build_agent (single source of truth)."""
-    from agentbuilder import AgentSpec, LLMClient, build_agent
-    from agentbuilder.agents.agent import Agent
+    from agentmaker import AgentSpec, LLMClient, build_agent
+    from agentmaker.agents.agent import Agent
 
     @tool
     def echo(text: str) -> str:

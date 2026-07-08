@@ -8,8 +8,8 @@ client (`async for chunk in llm.stream(...)`). Hermetic via ScriptedLLM.
 """
 import asyncio
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 async def main():

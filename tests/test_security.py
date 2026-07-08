@@ -5,7 +5,7 @@ Hermetic (no key, no network, no real MCP server). Locks:
 2. a missing confirm safely rejects (never blocks on stdin); async vs. sync function-tool dispatch;
 3. MCP tools require confirmation by default, namespace is mandatory (not derived from the server's self-reported name), origin is stamped, descriptions are sanitized, definitions are fingerprinted;
 4. ToolPermissions guards against tool-name impersonation by origin; the permission gate moves to the model-visible surface (denied tools never enter the schema) and is ordered ahead of execution;
-5. external tool-result content is delimited (indirect-injection defense); register_all survives name collisions; tool-registration errors join the AgentbuilderError family;
+5. external tool-result content is delimited (indirect-injection defense); register_all survives name collisions; tool-registration errors join the AgentmakerError family;
 6. existing red lines: Tracer redaction (secrets / home-directory PII) and NotesTool path-escape defense.
 """
 
@@ -17,18 +17,18 @@ import time
 
 import pytest
 
-from agentbuilder.agents.agent import Agent
-from agentbuilder.core.exceptions import ToolError, ToolRegistrationError
-from agentbuilder.core.llm_clients import LLMClient
-from agentbuilder.runtime.harness import Harness, cli_confirm
-from agentbuilder.runtime.observability.exporters import TraceExporter
-from agentbuilder.runtime.observability.tracer import Tracer
-from agentbuilder.tools import CalculatorTool, ToolPermissions, ToolRegistry
-from agentbuilder.tools.base import Tool, ToolParameter
-from agentbuilder.tools.integrations.mcp import MCPClient, MCPTool, _fingerprint, _sanitize_text
-from agentbuilder.tools.integrations.cli import CLITool
-from agentbuilder.tools.integrations.notes import NotesTool
-from agentbuilder.tools.response import ToolResponse
+from agentmaker.agents.agent import Agent
+from agentmaker.core.exceptions import ToolError, ToolRegistrationError
+from agentmaker.core.llm_clients import LLMClient
+from agentmaker.runtime.harness import Harness, cli_confirm
+from agentmaker.runtime.observability.exporters import TraceExporter
+from agentmaker.runtime.observability.tracer import Tracer
+from agentmaker.tools import CalculatorTool, ToolPermissions, ToolRegistry
+from agentmaker.tools.base import Tool, ToolParameter
+from agentmaker.tools.integrations.mcp import MCPClient, MCPTool, _fingerprint, _sanitize_text
+from agentmaker.tools.integrations.cli import CLITool
+from agentmaker.tools.integrations.notes import NotesTool
+from agentmaker.tools.response import ToolResponse
 
 
 # ---------- test doubles ----------
@@ -122,7 +122,7 @@ def test_no_confirm_rejects_high_risk_both_paths():
 
 def test_cli_confirm_is_exported_battery():
     """cli_confirm is exported as an explicit battery (no longer the default): callable, signature (tool, params) -> bool."""
-    from agentbuilder import cli_confirm as top_level
+    from agentmaker import cli_confirm as top_level
     assert top_level is cli_confirm
 
 
@@ -271,8 +271,8 @@ def test_external_content_with_braces_not_broken():
 
 def test_builtin_tools_external_content_flags():
     """Built-in external-content flags are correct: Search / RAG / MCP = True, Calculator = False."""
-    from agentbuilder.rag.rag_tool import RAGTool
-    from agentbuilder.tools import SearchTool
+    from agentmaker.rag.rag_tool import RAGTool
+    from agentmaker.tools import SearchTool
     assert SearchTool.external_content is True
     assert RAGTool.external_content is True
     assert MCPTool.external_content is True
@@ -297,7 +297,7 @@ def test_register_all_skip_avoids_dos():
         reg.register_all([CalculatorTool()])
 
 
-def test_tool_registration_error_is_agentbuilder_and_value_error():
+def test_tool_registration_error_is_agentmaker_and_value_error():
     """A registration failure is both a ToolError (unified family) and a ValueError (backward compatible)."""
     reg = ToolRegistry()
     reg.register(CalculatorTool())
@@ -328,14 +328,14 @@ def test_tracer_redacts_secrets_and_pii():
 def test_tracer_exporter_failure_counted_not_silent(caplog):
     """Exporter failures are no longer fully silent: summary().dropped counts them plus a first-time warning (out-of-band observability still never drags down the main flow)."""
     import logging
-    from agentbuilder.runtime.observability.exporters import TraceExporter
+    from agentmaker.runtime.observability.exporters import TraceExporter
 
     class _Broken(TraceExporter):
         def export(self, event): raise RuntimeError("disk full")
         def close(self): pass
 
     tr = Tracer(exporters=[_Broken()])
-    with caplog.at_level(logging.WARNING, logger="agentbuilder.runtime.observability.tracer"):
+    with caplog.at_level(logging.WARNING, logger="agentmaker.runtime.observability.tracer"):
         tr.emit({"type": "llm_call"})
         tr.emit({"type": "tool_call"})              # same exporter fails a second time: counted only, no repeat warning
     assert tr.summary()["dropped"] == {"_Broken": 2}            # both counted (not silently dropped)
@@ -464,7 +464,7 @@ def test_jsonl_exporter_concurrent_emit_no_torn_lines(tmp_path):
     import json
     import threading
 
-    from agentbuilder.runtime.observability.exporters import JsonlExporter
+    from agentmaker.runtime.observability.exporters import JsonlExporter
     path = str(tmp_path / "trace.jsonl")
     exp = JsonlExporter(path)
     n = 200

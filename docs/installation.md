@@ -1,7 +1,7 @@
 # Installation
 
 ```bash
-pip install agentbuilder
+pip install agentmaker
 ```
 
 Requires **Python 3.12+**.
@@ -22,9 +22,9 @@ The base package works out of the box, with no optional extras:
 Install only the capabilities you need. Each backend is imported lazily, so an extra you do not install costs nothing at import time.
 
 ```bash
-pip install "agentbuilder[anthropic]"        # one extra
-pip install "agentbuilder[anthropic,rag]"    # several
-pip install "agentbuilder[all]"              # everything below
+pip install "agentmaker[anthropic]"        # one extra
+pip install "agentmaker[anthropic,rag]"    # several
+pip install "agentmaker[all]"              # everything below
 ```
 
 | Extra | Adds |
@@ -60,6 +60,6 @@ Local engines (`ollama`, `vllm`, `sglang`) need no key. See [LLM clients & provi
 If you use [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add agentbuilder
-uv add "agentbuilder[all]"
+uv add agentmaker
+uv add "agentmaker[all]"
 ```

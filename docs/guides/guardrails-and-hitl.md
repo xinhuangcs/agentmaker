@@ -2,7 +2,7 @@
 
 This guide covers the safety and control layer around an agent run: **guardrails** that screen input and output and trip the run when a rule is violated, and **human-in-the-loop** (HITL, a person approving an action before it executes) that suspends a run at a high-risk tool call and waits for a decision. It also covers the supporting machinery those two rely on: lifecycle **hooks** for observing a run, **session** persistence for conversation history, **checkpoints** for suspend/resume and crash recovery, and **run policies** for global per-run limits. Reach for this page when you need to block certain inputs, require approval before a dangerous action, keep an audit trail, or cap what a single run is allowed to do.
 
-Everything on this page is grounded in [`examples/07_guardrails_and_hitl.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/07_guardrails_and_hitl.py), which is hermetic (runs with no API key and no network via `ScriptedLLM`, the LLM test double):
+Everything on this page is grounded in [`examples/07_guardrails_and_hitl.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/07_guardrails_and_hitl.py), which is hermetic (runs with no API key and no network via `ScriptedLLM`, the LLM test double):
 
 ```bash
 uv run python examples/07_guardrails_and_hitl.py
@@ -15,8 +15,8 @@ A guardrail checks a piece of text (an agent's input or its final output) and re
 The quickest way to make one is `CallableGuardrail`, which wraps any function `fn(text)` into a guardrail. The function returns a bool (True lets the text through, False is a tripwire) and the `message=` you pass at construction becomes the block explanation:
 
 ```python
-from agentbuilder import Agent, CallableGuardrail, GuardrailTripwireError, tool
-from agentbuilder.testing import MemoryCheckpointStore, ScriptedLLM
+from agentmaker import Agent, CallableGuardrail, GuardrailTripwireError, tool
+from agentmaker.testing import MemoryCheckpointStore, ScriptedLLM
 
 # 1) Guardrail: reject any input that mentions a password.
 no_secrets = CallableGuardrail(lambda text: "password" not in text.lower(),
@@ -42,7 +42,7 @@ The `str` of a `GuardrailTripwireError` is the readable block explanation shown 
 A `CallableGuardrail` wraps a function that returns either a bool or a `GuardrailResult`. With a bool, `False` trips the guardrail using the message you gave at construction; returning a `GuardrailResult` instead lets the function carry its own message. For example:
 
 ```python
-from agentbuilder import CallableGuardrail
+from agentmaker import CallableGuardrail
 
 # Bool form: False trips, using the message given at construction.
 length_limit = CallableGuardrail(lambda t: len(t) < 4000, message="input too long")
@@ -51,7 +51,7 @@ length_limit = CallableGuardrail(lambda t: len(t) < 4000, message="input too lon
 For anything more than a one-liner, subclass `Guardrail` and implement `check`:
 
 ```python
-from agentbuilder import Guardrail, GuardrailResult
+from agentmaker import Guardrail, GuardrailResult
 
 
 class BlocklistGuardrail(Guardrail):
@@ -68,7 +68,7 @@ class BlocklistGuardrail(Guardrail):
 `Guardrail` is an abstract base class with one abstract method, `check(self, text) -> GuardrailResult`. There is also an async counterpart `acheck(self, text) -> GuardrailResult`, which the framework's execution layer actually calls; by default it inlines a direct call to `check`. Most guardrails are pure computation (length, regex, blocklist checks) so the default is right. Override `acheck` only when the guardrail does blocking I/O or wants to call an LLM to moderate the text. `CallableGuardrail` accepts an async function too (an `async def`, or a lambda wrapping an async call), which it awaits through `acheck`.
 
 !!! note
-    agentbuilder ships the guardrail *interface* plus `CallableGuardrail`; the concrete rules are your business logic. There are no built-in content policies to configure. Write the checks your app needs and attach them as `input_guardrails` / `output_guardrails`.
+    agentmaker ships the guardrail *interface* plus `CallableGuardrail`; the concrete rules are your business logic. There are no built-in content policies to configure. Write the checks your app needs and attach them as `input_guardrails` / `output_guardrails`.
 
 ## Human-in-the-loop (HITL)
 
@@ -136,7 +136,7 @@ Call `resume(decision, *, scope=...)` to continue a suspended run. The `decision
 HITL suspend/resume is the right model for a server: the request returns an `Interrupt`, a human decides out of band, and a later request resumes. For a command-line or teaching setting you may instead want a blocking y/n prompt inline. `cli_confirm` is that battery: pass it as `confirm=cli_confirm` and a high-risk tool prints its action and asks on stdin.
 
 ```python
-from agentbuilder import Agent, cli_confirm
+from agentmaker import Agent, cli_confirm
 
 agent = Agent("ops", llm, tools=[delete_file], confirm=cli_confirm)
 ```
@@ -148,7 +148,7 @@ agent = Agent("ops", llm, tools=[delete_file], confirm=cli_confirm)
 A `Hook` is an observe-only lifecycle callback. Subclass `Hook`, override just the events you care about (the rest are no-ops), and attach a list with `hooks=[...]`. Hooks are for side effects such as logging, metrics, auditing, and cost tracking. They cannot intercept or modify the run; interception belongs to guardrails, permissions, and HITL.
 
 ```python
-from agentbuilder import Agent, Hook
+from agentmaker import Agent, Hook
 
 
 class AuditHook(Hook):
@@ -183,7 +183,7 @@ Every return value is ignored (hooks are pure side effects), and an exception ra
 By default an agent keeps conversation history in process, so a restart loses it. Attach a `SessionStore` to persist history and survive restarts. `SqliteSessionStore` is the built-in backend; give it a file path in production (the default `":memory:"` is for tests only). History is isolated by `Scope`, the same isolation label used across retrieval and memory (see [Retrieval & RAG](retrieval-and-rag.md)).
 
 ```python
-from agentbuilder import Agent, Scope, SqliteSessionStore
+from agentmaker import Agent, Scope, SqliteSessionStore
 
 store = SqliteSessionStore("daemon.db")
 agent = Agent("assistant", llm, session_store=store, scope=Scope(user="alice", session="chat-1"))
@@ -196,7 +196,7 @@ agent = Agent("assistant", llm, session_store=store, scope=Scope(user="alice", s
 `ConversationSearch` wraps any `SessionStore` to make past conversations semantically searchable (episodic recall: "what did we discuss before"). It is itself a `SessionStore`, so you attach it in place of the plain store; on top of the usual methods it adds `search(query, *, top_k=5, scope=None)` returning a list of `RetrievalResult`. It needs a shared retrieval backbone (a `HybridRetriever`) to index into:
 
 ```python
-from agentbuilder import ConversationSearch, SqliteSessionStore
+from agentmaker import ConversationSearch, SqliteSessionStore
 
 searchable = ConversationSearch(SqliteSessionStore("daemon.db"), retriever)
 agent = Agent("assistant", llm, session_store=searchable, scope=scope)
@@ -215,7 +215,7 @@ Under the hood, a run's trajectory lives in an `ExecutionState`: the message lis
 Unlike a session store, a checkpoint is the single current restorable state: `save` overwrites (one point per scope) and the checkpoint is cleared once the run completes or a resume succeeds. `CheckpointStore` is the abstract interface (`save` / `load` / `clear` by scope, plus `a*` async forms); `SqliteCheckpointStore` is the built-in backend and can share a database file with sessions and memory.
 
 ```python
-from agentbuilder import Agent, SqliteCheckpointStore
+from agentmaker import Agent, SqliteCheckpointStore
 
 agent = Agent("ops", llm, tools=[delete_file],
               checkpoint_store=SqliteCheckpointStore("daemon.db"))
@@ -225,10 +225,10 @@ You normally do not construct `ExecutionState` yourself; you pass a checkpoint s
 
 ## Run policies and limits
 
-A `RunPolicy` sets global limits for a single run and an optional cancellation hook. Attach it with `run_policy=...`. When a limit is exceeded the run aborts with `RunLimitExceeded`; when the cancel hook returns `True` the run aborts with `RunCancelled`. Both are framework exceptions (subclasses of `AgentbuilderError`).
+A `RunPolicy` sets global limits for a single run and an optional cancellation hook. Attach it with `run_policy=...`. When a limit is exceeded the run aborts with `RunLimitExceeded`; when the cancel hook returns `True` the run aborts with `RunCancelled`. Both are framework exceptions (subclasses of `AgentmakerError`).
 
 ```python
-from agentbuilder import Agent, RunPolicy, RunLimitExceeded
+from agentmaker import Agent, RunPolicy, RunLimitExceeded
 
 policy = RunPolicy(max_llm_calls=8, max_tool_calls=20, deadline_seconds=30)
 agent = Agent("assistant", llm, tools=[delete_file], run_policy=policy)

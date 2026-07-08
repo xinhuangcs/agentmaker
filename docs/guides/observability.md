@@ -4,11 +4,11 @@ Every agent run can emit a structured trace: one record per LLM call, tool call,
 
 ## Attach a tracer
 
-Construct a `Tracer` and pass it to the agent. The tracer collects the events the agent emits during the run; you read them back from the exporter afterward. This example is hermetic (no API key, no network), copied from [`examples/13_observability.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/13_observability.py):
+Construct a `Tracer` and pass it to the agent. The tracer collects the events the agent emits during the run; you read them back from the exporter afterward. This example is hermetic (no API key, no network), copied from [`examples/13_observability.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/13_observability.py):
 
 ```python
-from agentbuilder import Agent, MemoryExporter, Tracer, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, MemoryExporter, Tracer, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -65,12 +65,12 @@ An exporter decides where events go. All four subclass `TraceExporter` (interfac
 | `MemoryExporter` | `MemoryExporter(max_events=2048)` | An in-memory list (ring buffer, drops oldest past the cap). The default sink; lost on restart. |
 | `JsonlExporter` | `JsonlExporter(path)` | One JSON line appended per event (JSON Lines), flushed immediately. |
 | `SqliteExporter` | `SqliteExporter(db_path=":memory:")` | One row per event in a `traces` table (`type`, `run_id`, `event`, `created_at`), indexed on `run_id`. |
-| `OTelExporter` | `OTelExporter(tracer_name="agentbuilder", *, carrier_provider=None)` | One OpenTelemetry (OTel, the vendor-neutral tracing standard) span per event, for Jaeger / Grafana / Datadog. |
+| `OTelExporter` | `OTelExporter(tracer_name="agentmaker", *, carrier_provider=None)` | One OpenTelemetry (OTel, the vendor-neutral tracing standard) span per event, for Jaeger / Grafana / Datadog. |
 
 If you pass no `exporters`, the tracer defaults to `[MemoryExporter()]`. To persist while still reading events in-process, include a `MemoryExporter()` alongside the persistent one:
 
 ```python
-from agentbuilder import JsonlExporter, MemoryExporter, Tracer
+from agentmaker import JsonlExporter, MemoryExporter, Tracer
 
 tracer = Tracer(exporters=[MemoryExporter(), JsonlExporter("run.jsonl")])
 ```
@@ -82,7 +82,7 @@ Call `tracer.close()` before the process exits to flush and release file / datab
 `OTelExporter` maps each event to a span. It uses the event's `latency_ms` to give the span a real width in a waterfall view (rather than a zero-width point), and always attaches `run_id` as a span attribute so a backend can filter per run. It lazily imports `opentelemetry`, so install the `otel` extra:
 
 ```bash
-pip install "agentbuilder[otel]"
+pip install "agentmaker[otel]"
 ```
 
 To make agent spans join an upstream request trace, pass `carrier_provider=current_trace_carrier`. See [Run-level context](#run-level-context) below for how the carrier is supplied.
@@ -103,7 +103,7 @@ An exporter that throws is swallowed by default so a side-channel failure (disk 
 The framework propagates a run's identity and governance state through `contextvars`, so async tasks and thread pools stay isolated. These accessors let an app, tool, or hook read the current run's context. All are importable from the top level:
 
 ```python
-from agentbuilder import (
+from agentmaker import (
     current_run_id, current_scope, current_step, current_trace_carrier,
 )
 ```
@@ -126,7 +126,7 @@ With `OTelExporter(carrier_provider=current_trace_carrier)` attached, each of th
 Most LLM and tool calls run through the harness, which applies run limits and tracing for free. A few framework paths call the model directly, bypassing the harness. If you hand-write a recipe that calls an LLM directly and want it to respect the same run governance, route the call through `governed_chat` (async):
 
 ```python
-from agentbuilder import governed_chat
+from agentmaker import governed_chat
 
 response = await governed_chat(llm, messages, tracer=tracer, origin="my.recipe")
 ```
@@ -135,16 +135,16 @@ It checks the run's limits, awaits `llm.chat(messages, ...)`, records the call's
 
 ## Trace Detective (devtools)
 
-Trace Detective is an optional developer tool that consumes a recorded trace and returns an LLM-written diagnosis: the earliest step that went wrong, the root cause, and the smallest fix. It lives in the `agentbuilder.devtools` subpackage, which the framework core never imports, so the native tracing described above works with or without it. It ships behind the `devtools` extra:
+Trace Detective is an optional developer tool that consumes a recorded trace and returns an LLM-written diagnosis: the earliest step that went wrong, the root cause, and the smallest fix. It lives in the `agentmaker.devtools` subpackage, which the framework core never imports, so the native tracing described above works with or without it. It ships behind the `devtools` extra:
 
 ```bash
-pip install "agentbuilder[devtools]"
+pip install "agentmaker[devtools]"
 ```
 
 Because it is not part of the top-level namespace, import it on demand:
 
 ```python
-from agentbuilder.devtools import diagnose_trace, DoctorHook
+from agentmaker.devtools import diagnose_trace, DoctorHook
 ```
 
 ### Diagnose from the library
@@ -152,20 +152,20 @@ from agentbuilder.devtools import diagnose_trace, DoctorHook
 Record a run to a JSONL file (attach a `JsonlExporter` as shown above), then hand the file to `diagnose_trace`. It parses the whole trace, picks one run (by `run_id`, or the most recent), and diagnoses it with any LLM client. It returns the parsed run and the verdict:
 
 ```python
-from agentbuilder import LLMClient
-from agentbuilder.devtools import diagnose_trace
+from agentmaker import LLMClient
+from agentmaker.devtools import diagnose_trace
 
 run, verdict = diagnose_trace(open("run.jsonl").read(), LLMClient("deepseek"))
 ```
 
-The verdict is a `TraceDiagnosis` with these fields: `healthy` (bool), `first_bad_step` (the earliest failing step number, or `None`), `what_went_wrong`, `root_cause`, `suggested_fix`, and `confidence` (`"low"` / `"medium"` / `"high"`). Diagnosis runs through a normal agentbuilder agent with structured output, so any LLM client the framework supports works here unchanged.
+The verdict is a `TraceDiagnosis` with these fields: `healthy` (bool), `first_bad_step` (the earliest failing step number, or `None`), `what_went_wrong`, `root_cause`, `suggested_fix`, and `confidence` (`"low"` / `"medium"` / `"high"`). Diagnosis runs through a normal agentmaker agent with structured output, so any LLM client the framework supports works here unchanged.
 
 ### Diagnose in the web UI
 
 Start the local web server:
 
 ```bash
-python -m agentbuilder.devtools
+python -m agentmaker.devtools
 ```
 
 It binds `127.0.0.1:8765` by default (a local debugging tool, not something to expose). Paste or load a trace to see the deterministic timeline plus findings, then request an LLM diagnosis. The server builds its diagnosis client from environment API keys; if no key is available it still starts in parse-only mode so the timeline stays usable. Useful flags: `--host`, `--port`, `--provider` (default `deepseek`), `--model`, and `--no-llm` (parse-only, skip the LLM).

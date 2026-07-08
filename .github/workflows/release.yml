@@ -21,12 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/agentbuilder/
+      url: https://pypi.org/project/agentmaker/
     permissions:
       id-token: write                      # OIDC token for PyPI trusted publishing (no API token needed)
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5      # v4.2.2
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e    # v6.7.0
       - run: uv build
-      - run: ls dist/agentbuilder-${GITHUB_REF_NAME#v}-*.whl                 # fail fast if the tag != package version
+      - run: ls dist/agentmaker-${GITHUB_REF_NAME#v}-*.whl                 # fail fast if the tag != package version
       - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b   # release/v1

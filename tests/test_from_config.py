@@ -8,9 +8,9 @@ and a missing embedder with no injected backend raises a clear error.
 
 import pytest
 
-from agentbuilder import (ChunkingConfig, IngestionPipeline, AgentbuilderConfig, Memory, MemoryConfig,
+from agentmaker import (ChunkingConfig, IngestionPipeline, AgentmakerConfig, Memory, MemoryConfig,
                     RagConfig, RagRetriever, RetrievalConfig)
-from agentbuilder.retrieval import HybridRetriever
+from agentmaker.retrieval import HybridRetriever
 
 
 class _FakeEmbedder:
@@ -24,14 +24,14 @@ class _FakeEmbedder:
 # ---- default sqlite backend: one-line stack + correct sub-config slicing ----
 
 def test_memory_from_config_default_sqlite():
-    m = Memory.from_config(AgentbuilderConfig(memory=MemoryConfig(search_top_k=9)), embedder=_FakeEmbedder())
+    m = Memory.from_config(AgentmakerConfig(memory=MemoryConfig(search_top_k=9)), embedder=_FakeEmbedder())
     assert isinstance(m, Memory)
     assert isinstance(m.retriever, HybridRetriever)   # default built the sqlite backend
     assert m.cfg.search_top_k == 9                    # config.memory sliced out correctly
 
 
 def test_rag_from_config_default_and_shared_backend():
-    cfg = AgentbuilderConfig(retrieval=RetrievalConfig(top_k=8), rag=RagConfig(mq_max_queries=3))
+    cfg = AgentmakerConfig(retrieval=RetrievalConfig(top_k=8), rag=RagConfig(mq_max_queries=3))
     rag = RagRetriever.from_config(cfg, embedder=_FakeEmbedder())
     assert isinstance(rag, RagRetriever) and rag.cfg.top_k == 8 and rag.rag_cfg.mq_max_queries == 3
     # ingestion reuses rag's same backend (the app's shared-assembly pattern: read and write the same data)
@@ -44,7 +44,7 @@ def test_rag_from_config_default_and_shared_backend():
 
 def test_from_config_injects_backend_without_embedder():
     retr, store = object(), object()                  # stand in for a "custom backend"; duck typing is enough
-    m = Memory.from_config(AgentbuilderConfig(), retriever=retr, store=store)
+    m = Memory.from_config(AgentmakerConfig(), retriever=retr, store=store)
     assert m.retriever is retr and m.store is store    # injected and used as-is, no embedder needed
 
 
@@ -53,14 +53,14 @@ def test_from_config_injects_backend_without_embedder():
 @pytest.mark.parametrize("cls", [Memory, RagRetriever, IngestionPipeline])
 def test_from_config_requires_embedder_or_retriever(cls):
     with pytest.raises(ValueError):
-        cls.from_config(AgentbuilderConfig())
+        cls.from_config(AgentmakerConfig())
 
 
 # ---- validation gate / falsy store / HistoryCompactor.from_config ----
 
 def test_from_config_validates_used_slice():
     """from_config validates the sub-config it actually uses before handing it off: an invalid rrf_k is caught at assembly time, not deferred to retrieval."""
-    bad = AgentbuilderConfig(retrieval=RetrievalConfig(rrf_k=0))      # rrf_k must be >= 1
+    bad = AgentmakerConfig(retrieval=RetrievalConfig(rrf_k=0))      # rrf_k must be >= 1
     with pytest.raises(ValueError):
         RagRetriever.from_config(bad, retriever=object())       # RagRetriever always uses config.retrieval -> always caught
     with pytest.raises(ValueError):
@@ -72,12 +72,12 @@ def test_from_config_keeps_falsy_store():
     class _Falsy:
         def __bool__(self): return False
     s = _Falsy()
-    assert Memory.from_config(AgentbuilderConfig(), retriever=object(), store=s).store is s
+    assert Memory.from_config(AgentmakerConfig(), retriever=object(), store=s).store is s
 
 
 def test_history_compactor_from_config():
     """HistoryCompactor.from_config slices config.compaction (the auto-assembly entry point for CompactionConfig)."""
-    from agentbuilder import CompactionConfig, HistoryCompactor, LLMClient
-    cfg = AgentbuilderConfig(compaction=CompactionConfig(keep_recent=7, trigger_tokens=999))
+    from agentmaker import CompactionConfig, HistoryCompactor, LLMClient
+    cfg = AgentmakerConfig(compaction=CompactionConfig(keep_recent=7, trigger_tokens=999))
     hc = HistoryCompactor.from_config(LLMClient("deepseek", api_key="x"), cfg)
     assert hc.keep_recent == 7 and hc.trigger_tokens == 999

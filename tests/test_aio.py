@@ -7,7 +7,7 @@ import contextvars
 
 import pytest
 
-from agentbuilder.core.aio import _ensure_loop, iter_sync, run_sync
+from agentmaker.core.aio import _ensure_loop, iter_sync, run_sync
 
 
 # ---------- run_sync ----------
@@ -97,7 +97,7 @@ def test_iter_sync_contextvars_visible_across_segments():
 def test_iter_sync_start_run_inside_async_gen():
     """start_run/reset_run inside an async generator (the real streaming shape): reset raises no Token
     error and run_id stays readable across segments. A per-segment context-copy implementation would make reset_run raise ValueError('created in a different Context')."""
-    from agentbuilder.runtime.execution.run_context import current_run_id, record_llm, reset_run, start_run
+    from agentmaker.runtime.execution.run_context import current_run_id, record_llm, reset_run, start_run
     ids = []
 
     async def agen():
@@ -153,8 +153,8 @@ def test_iter_sync_created_sync_consumed_in_async_reports_guidance():
 def test_async_exec_tool_confirm_can_reenter_sync_facade():
     """The confirm callback runs on a worker thread: re-entering the sync facade from inside it
     (a legal pattern, e.g. using another LLM to judge approval) does not hit a "running loop" and the whole run does not crash."""
-    from agentbuilder.runtime.harness import Harness
-    from agentbuilder.tools import ToolRegistry
+    from agentmaker.runtime.harness import Harness
+    from agentmaker.tools import ToolRegistry
 
     reg = ToolRegistry()
     reg.register_function(lambda p: "已执行", name="danger", description="高风险桩", requires_confirmation=True)
@@ -181,7 +181,7 @@ def test_adapter_async_client_cached_per_loop():
     """Async SDK clients are cached per event loop: reused within a loop, one per loop across loops.
     The underlying connection pool binds to the loop of first use, so reusing it across loops would raise "attached to a different loop"."""
     pytest.importorskip("openai")
-    from agentbuilder.core.adapters import OpenAIAdapter
+    from agentmaker.core.adapters import OpenAIAdapter
     a = OpenAIAdapter(model="m", api_key="k", base_url=None, timeout=5, default_temperature=0.0)
 
     async def grab():
@@ -197,7 +197,7 @@ def test_adapter_async_client_cached_per_loop():
 def test_adapter_async_clients_evicted_for_closed_loops():
     """Client entries for closed loops are evicted on access, so a long-running "one asyncio.run per task" pattern does not accumulate clients and connections (fd leak)."""
     pytest.importorskip("openai")
-    from agentbuilder.core.adapters import OpenAIAdapter
+    from agentmaker.core.adapters import OpenAIAdapter
     a = OpenAIAdapter(model="m", api_key="k", base_url=None, timeout=5, default_temperature=0.0)
 
     async def grab():

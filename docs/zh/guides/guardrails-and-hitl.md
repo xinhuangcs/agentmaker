@@ -2,7 +2,7 @@
 
 本指南介绍 Agent 运行外围的安全与控制层：一是**护栏**（guardrails），负责审查输入和输出，一旦违反规则就中断运行；二是HITL（即 human-in-the-loop，指某个动作执行前先由人来批准），在遇到高风险工具调用时挂起运行，等待人做决定。同时也介绍这两者所依赖的配套机制：用于观测运行的生命周期**钩子**（hooks）、用于保存对话历史的**会话**（session）持久化、用于挂起/恢复与崩溃恢复的**检查点**（checkpoints），以及为单次运行设定全局上限的**运行策略**（run policies）。当你需要拦截某些输入、在危险动作前要求批准、保留审计记录，或限制单次运行能做什么时，就查阅本页。
 
-本页所有内容都基于 [`examples/07_guardrails_and_hitl.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/07_guardrails_and_hitl.py)，它是自洽（hermetic）的，借助 `ScriptedLLM`（LLM 测试替身）实现无需 API key、无需联网即可运行：
+本页所有内容都基于 [`examples/07_guardrails_and_hitl.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/07_guardrails_and_hitl.py)，它是自洽（hermetic）的，借助 `ScriptedLLM`（LLM 测试替身）实现无需 API key、无需联网即可运行：
 
 ```bash
 uv run python examples/07_guardrails_and_hitl.py
@@ -15,8 +15,8 @@ uv run python examples/07_guardrails_and_hitl.py
 最快的做法是使用 `CallableGuardrail`，它把任意函数 `fn(text)` 包装成一个护栏。该函数返回一个布尔值（True 让文本通过，False 触发触发线），而你在构造时传入的 `message=` 就成为拦截说明：
 
 ```python
-from agentbuilder import Agent, CallableGuardrail, GuardrailTripwireError, tool
-from agentbuilder.testing import MemoryCheckpointStore, ScriptedLLM
+from agentmaker import Agent, CallableGuardrail, GuardrailTripwireError, tool
+from agentmaker.testing import MemoryCheckpointStore, ScriptedLLM
 
 # 1) Guardrail: reject any input that mentions a password.
 no_secrets = CallableGuardrail(lambda text: "password" not in text.lower(),
@@ -42,7 +42,7 @@ except GuardrailTripwireError as e:
 `CallableGuardrail` 包装一个既可以返回布尔值、也可以返回 `GuardrailResult` 的函数。返回布尔值时，`False` 会触发护栏，并使用你在构造时给定的 message；改为返回一个 `GuardrailResult`，则可让该函数携带自己的 message。例如：
 
 ```python
-from agentbuilder import CallableGuardrail
+from agentmaker import CallableGuardrail
 
 # Bool form: False trips, using the message given at construction.
 length_limit = CallableGuardrail(lambda t: len(t) < 4000, message="input too long")
@@ -51,7 +51,7 @@ length_limit = CallableGuardrail(lambda t: len(t) < 4000, message="input too lon
 对于超出一行代码的逻辑，请继承 `Guardrail` 并实现 `check`：
 
 ```python
-from agentbuilder import Guardrail, GuardrailResult
+from agentmaker import Guardrail, GuardrailResult
 
 
 class BlocklistGuardrail(Guardrail):
@@ -68,7 +68,7 @@ class BlocklistGuardrail(Guardrail):
 `Guardrail` 是一个抽象基类，只有一个抽象方法 `check(self, text) -> GuardrailResult`。此外还有一个异步版本 `acheck(self, text) -> GuardrailResult`，框架的执行层实际调用的正是它；默认情况下它内联为对 `check` 的直接调用。大多数护栏都是纯计算（长度、正则、屏蔽词检查），所以默认实现即可。只有当护栏涉及阻塞式 I/O，或想调用 LLM 来对文本做内容审核时，才需要重写 `acheck`。`CallableGuardrail` 也接受异步函数（一个 `async def`，或包装了异步调用的 lambda），并通过 `acheck` 对其进行 await。
 
 !!! note
-    agentbuilder 提供的是护栏*接口*以及 `CallableGuardrail`；具体规则是你自己的业务逻辑。框架不内置任何可配置的内容策略。请编写你的应用所需的检查，并把它们挂为 `input_guardrails` / `output_guardrails`。
+    agentmaker 提供的是护栏*接口*以及 `CallableGuardrail`；具体规则是你自己的业务逻辑。框架不内置任何可配置的内容策略。请编写你的应用所需的检查，并把它们挂为 `input_guardrails` / `output_guardrails`。
 
 ## 人在回路（HITL）
 
@@ -136,7 +136,7 @@ if result.interrupt:                                    # run paused, awaiting a
 对于服务器，HITL 的挂起/恢复才是正确模型：请求返回一个 `Interrupt`，人在带外做出决定，之后的一次请求再恢复运行。而在命令行或教学场景中，你可能想要一个内联的、阻塞式的 y/n 提示。`cli_confirm` 就是这样一个开箱即用的组件：把它作为 `confirm=cli_confirm` 传入，高风险工具就会打印出它的动作并在标准输入上发问。
 
 ```python
-from agentbuilder import Agent, cli_confirm
+from agentmaker import Agent, cli_confirm
 
 agent = Agent("ops", llm, tools=[delete_file], confirm=cli_confirm)
 ```
@@ -148,7 +148,7 @@ agent = Agent("ops", llm, tools=[delete_file], confirm=cli_confirm)
 `Hook` 是一个只观测的生命周期回调。继承 `Hook`，只重写你关心的事件（其余都是空操作），并用 `hooks=[...]` 挂上一个列表。钩子用于日志、指标、审计、成本跟踪等副作用。它们无法拦截或修改运行；拦截是护栏、权限和 HITL 的职责。
 
 ```python
-from agentbuilder import Agent, Hook
+from agentmaker import Agent, Hook
 
 
 class AuditHook(Hook):
@@ -183,7 +183,7 @@ agent = Agent("assistant", llm, tools=[delete_file], hooks=[AuditHook()])
 默认情况下，Agent 把对话历史保存在进程内，因此一次重启就会丢失历史。挂上一个 `SessionStore` 即可持久化历史并跨重启存续。`SqliteSessionStore` 是内置后端；生产环境请给它一个文件路径（默认的 `":memory:"` 仅供测试）。历史按 `Scope` 隔离，这与检索和记忆中使用的隔离标签是同一个（见 [检索与 RAG](retrieval-and-rag.md)）。
 
 ```python
-from agentbuilder import Agent, Scope, SqliteSessionStore
+from agentmaker import Agent, Scope, SqliteSessionStore
 
 store = SqliteSessionStore("daemon.db")
 agent = Agent("assistant", llm, session_store=store, scope=Scope(user="alice", session="chat-1"))
@@ -196,7 +196,7 @@ agent = Agent("assistant", llm, session_store=store, scope=Scope(user="alice", s
 `ConversationSearch` 包裹任意 `SessionStore`，使过往对话可按语义检索（情景式回忆，即“我们之前聊过什么”）。它本身也是一个 `SessionStore`，所以你可以用它替换普通存储直接挂上；在常规方法之上，它新增了 `search(query, *, top_k=5, scope=None)`，返回一个 `RetrievalResult` 列表。它需要一个共享的检索骨干（一个 `HybridRetriever`）来建立索引：
 
 ```python
-from agentbuilder import ConversationSearch, SqliteSessionStore
+from agentmaker import ConversationSearch, SqliteSessionStore
 
 searchable = ConversationSearch(SqliteSessionStore("daemon.db"), retriever)
 agent = Agent("assistant", llm, session_store=searchable, scope=scope)
@@ -215,7 +215,7 @@ agent = Agent("assistant", llm, session_store=searchable, scope=scope)
 与会话存储不同，检查点是唯一的当前可恢复状态：`save` 会覆盖（每个 scope 只有一个点），并且一旦运行完成或某次恢复成功，检查点就会被清除。`CheckpointStore` 是抽象接口（按 scope 的 `save` / `load` / `clear`，外加 `a*` 异步形式）；`SqliteCheckpointStore` 是内置后端，可以与会话和记忆共用一个数据库文件。
 
 ```python
-from agentbuilder import Agent, SqliteCheckpointStore
+from agentmaker import Agent, SqliteCheckpointStore
 
 agent = Agent("ops", llm, tools=[delete_file],
               checkpoint_store=SqliteCheckpointStore("daemon.db"))
@@ -225,10 +225,10 @@ agent = Agent("ops", llm, tools=[delete_file],
 
 ## 运行策略与上限
 
-`RunPolicy` 为单次运行设定全局上限，并可选地设一个取消钩子。用 `run_policy=...` 挂上它。当超出某个上限时，运行以 `RunLimitExceeded` 中止；当取消钩子返回 `True` 时，运行以 `RunCancelled` 中止。两者都是框架异常（`AgentbuilderError` 的子类）。
+`RunPolicy` 为单次运行设定全局上限，并可选地设一个取消钩子。用 `run_policy=...` 挂上它。当超出某个上限时，运行以 `RunLimitExceeded` 中止；当取消钩子返回 `True` 时，运行以 `RunCancelled` 中止。两者都是框架异常（`AgentmakerError` 的子类）。
 
 ```python
-from agentbuilder import Agent, RunPolicy, RunLimitExceeded
+from agentmaker import Agent, RunPolicy, RunLimitExceeded
 
 policy = RunPolicy(max_llm_calls=8, max_tool_calls=20, deadline_seconds=30)
 agent = Agent("assistant", llm, tools=[delete_file], run_policy=policy)

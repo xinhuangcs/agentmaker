@@ -6,13 +6,13 @@ Skills use progressive disclosure: at startup the agent sees only each skill's n
 
 ## Quickstart
 
-This is [`examples/16_skills.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/16_skills.py) verbatim. It is hermetic (it writes to a temp directory, needs no API key and no network):
+This is [`examples/16_skills.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/16_skills.py) verbatim. It is hermetic (it writes to a temp directory, needs no API key and no network):
 
 ```python
 import tempfile
 from pathlib import Path
 
-from agentbuilder import SkillLoader
+from agentmaker import SkillLoader
 
 # Create a couple of skills on disk; each is a folder containing a SKILL.md.
 root = Path(tempfile.mkdtemp())

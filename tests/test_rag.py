@@ -1,4 +1,4 @@
-"""Regression net for agentbuilder.rag (hermetic: stub retriever, no key / no network).
+"""Regression net for agentmaker.rag (hermetic: stub retriever, no key / no network).
 
 Locks down: source-of-truth composite primary key (chunk_id, scope) isolation + scope-aware get, old-schema open-time
 self-check, reimport failure preserving the old version, delete hitting the index before the source of truth, splitter
@@ -10,12 +10,12 @@ import sqlite3
 
 import pytest
 
-from agentbuilder.core.exceptions import RetrievalError
-from agentbuilder.core.text import count_tokens
-from agentbuilder.rag import IngestionPipeline, RAGTool, SourceStore, load_file, split_document
-from agentbuilder.rag.types import Chunk, ChunkingConfig, Document
-from agentbuilder.rag.splitter import TextSplitter
-from agentbuilder.retrieval import Scope
+from agentmaker.core.exceptions import RetrievalError
+from agentmaker.core.text import count_tokens
+from agentmaker.rag import IngestionPipeline, RAGTool, SourceStore, load_file, split_document
+from agentmaker.rag.types import Chunk, ChunkingConfig, Document
+from agentmaker.rag.splitter import TextSplitter
+from agentmaker.retrieval import Scope
 
 RAG = Scope(base="rag")
 MD = "# A\nalpha body one.\n\n## B\nbeta body two."
@@ -225,8 +225,8 @@ def test_ingest_routes_writes_through_injected_index_sync():
 
 def test_retrieve_filters_and_self_heals_orphan():
     """A retrieval hit whose source of truth is gone (orphan) -> the index's stale content isn't returned, and a read-time self-heal removes the orphan from the index (like memory.search)."""
-    from agentbuilder.rag import RagRetriever
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag import RagRetriever
+    from agentmaker.retrieval.types import RetrievalResult
 
     class _OrphanRetriever:
         def __init__(self): self.deleted = []
@@ -267,8 +267,8 @@ def test_count_tokens_cn_en():
 
 def test_ragretriever_system_prompt_injectable():
     """system_prompt can be injected to override the default; _build_messages uses the instance prompt and assembles chunks into numbered sources + the question."""
-    from agentbuilder.rag.retriever import RagRetriever, DEFAULT_ASK_PROMPT
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag.retriever import RagRetriever, DEFAULT_ASK_PROMPT
+    from agentmaker.retrieval.types import RetrievalResult
     r = RagRetriever(retriever=object(), source_store=object(), llm=object())
     assert r.system_prompt is DEFAULT_ASK_PROMPT                        # not passed = framework default
     r2 = RagRetriever(retriever=object(), source_store=object(), llm=object(), system_prompt="X")
@@ -279,7 +279,7 @@ def test_ragretriever_system_prompt_injectable():
 
 def test_component_prompts_overridable():
     """Each RAG component's built-in prompt can be wholesale-overridden via a constructor arg; omitted, it uses the public DEFAULT_* default (behavior unchanged)."""
-    from agentbuilder.rag import (DEFAULT_CONTEXT_PROMPT, DEFAULT_HYDE_PROMPT, DEFAULT_MQE_PROMPT,
+    from agentmaker.rag import (DEFAULT_CONTEXT_PROMPT, DEFAULT_HYDE_PROMPT, DEFAULT_MQE_PROMPT,
                             HyDETransformer, LLMContextualizer, MultiQueryExpander)
     # omitted = public default constant; passed = your own
     assert MultiQueryExpander(object()).expand_prompt is DEFAULT_MQE_PROMPT
@@ -322,7 +322,7 @@ class _SearchRetriever:
     """Stub retriever: records searched queries; search is single, search_many is batch, each query returns 1 result (the id embeds the query, to make fan-out assertions easy)."""
     def __init__(self): self.queries = []
     def _hit(self, query):
-        from agentbuilder.retrieval.types import RetrievalResult
+        from agentmaker.retrieval.types import RetrievalResult
         self.queries.append(query)
         return [RetrievalResult(content="c", score=1.0, source="vector", id="id-" + query)]
     def search(self, query, *, top_k=5, candidate_pool=20, scope=None):
@@ -339,7 +339,7 @@ class _GetStore:
 
 def test_mqe_transform():
     """MQE: original query + rewrites; dirty responses get symbols stripped / blanks filtered / truncated to n; on LLM failure falls back to [query]."""
-    from agentbuilder.rag import MultiQueryExpander
+    from agentmaker.rag import MultiQueryExpander
     qs = MultiQueryExpander(_FakeLLM("住宿费上限\n酒店费用"), n=2).transform("住宿能报多少")
     assert qs[0] == "住宿能报多少" and "住宿费上限" in qs and "酒店费用" in qs
     # list markers + blank lines + more than n items -> strip -•*, drop blanks, truncate to n (no empty queries, no unbounded fan-out)
@@ -353,7 +353,7 @@ def test_mqe_transform():
 
 def test_search_sanitizes_transformer_output():
     """_search sanitizes a custom transformer's output: drops empty / non-string, truncates to the cap, and never feeds a dirty query to the backend."""
-    from agentbuilder.rag import QueryTransformer, RagRetriever
+    from agentmaker.rag import QueryTransformer, RagRetriever
 
     class _Junk(QueryTransformer):
         def transform(self, query):
@@ -368,7 +368,7 @@ def test_search_sanitizes_transformer_output():
 
 def test_hyde_transform():
     """HyDE: original query + hypothetical document; on LLM failure falls back to [query]."""
-    from agentbuilder.rag import HyDETransformer
+    from agentmaker.rag import HyDETransformer
     assert HyDETransformer(_FakeLLM("公司住宿费每晚 500 元。")).transform("住宿能报多少") \
         == ["住宿能报多少", "公司住宿费每晚 500 元。"]
     boom = _FakeLLM("x")
@@ -378,7 +378,7 @@ def test_hyde_transform():
 
 def test_retrieve_default_off_single_query():
     """No query_transformer by default: retrieve searches once with the original query."""
-    from agentbuilder.rag import RagRetriever
+    from agentmaker.rag import RagRetriever
     fr = _SearchRetriever()
     RagRetriever(fr, _GetStore(), _FakeLLM("")).retrieve("住宿能报多少", top_k=3)
     assert fr.queries == ["住宿能报多少"]
@@ -386,7 +386,7 @@ def test_retrieve_default_off_single_query():
 
 def test_retrieve_mqe_fans_out_and_merges():
     """With MQE on: the original query + rewrites each get searched, results merged by RRF."""
-    from agentbuilder.rag import MultiQueryExpander, RagRetriever
+    from agentmaker.rag import MultiQueryExpander, RagRetriever
     fr = _SearchRetriever()
     rag = RagRetriever(fr, _GetStore(), _FakeLLM(""),
                        query_transformer=MultiQueryExpander(_FakeLLM("v1\nv2"), n=2))
@@ -399,9 +399,9 @@ def test_retrieve_mqe_fans_out_and_merges():
 
 def test_retrieve_passes_filters_only_when_given():
     """retrieve passes filters through only when given (doesn't force stubs to grow the parameter); when given, they reach the backend as-is."""
-    from agentbuilder.rag import RagRetriever
-    from agentbuilder.retrieval import MetadataFilter
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag import RagRetriever
+    from agentmaker.retrieval import MetadataFilter
+    from agentmaker.retrieval.types import RetrievalResult
 
     class _SpyRetriever:
         def __init__(self): self.kwargs = None
@@ -420,8 +420,8 @@ def test_retrieve_passes_filters_only_when_given():
 
 def test_multi_query_fusion_uses_retriever_fusion_seam():
     """The multi-query path (with a query_transformer) uses the backend's fusion seam (injecting a custom fusion bypasses the hardwired RRF)."""
-    from agentbuilder.rag import QueryTransformer, RagRetriever
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag import QueryTransformer, RagRetriever
+    from agentmaker.retrieval.types import RetrievalResult
 
     class _TwoQueries(QueryTransformer):
         def transform(self, query):
@@ -443,8 +443,8 @@ def test_multi_query_fusion_uses_retriever_fusion_seam():
 
 def test_ragtool_filter_fields_become_params_and_filters():
     """RAGTool(filter_fields=) exposes filter fields as parameters; a value the model fills is assembled into a MetadataFilter and passed to retrieval."""
-    from agentbuilder.rag import RAGTool, RagRetriever
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag import RAGTool, RagRetriever
+    from agentmaker.retrieval.types import RetrievalResult
 
     class _SpyRetriever:
         def __init__(self): self.filters = "UNSET"
@@ -511,7 +511,7 @@ def test_delete_document_clears_doc_hash():
 
 def test_ingest_report_shape():
     """ingest_text/ingest_file return an IngestReport: has doc_id/chunks, and skipped is always present (default False, True when short-circuited)."""
-    from agentbuilder.rag import IngestReport
+    from agentmaker.rag import IngestReport
     pipe = IngestionPipeline(retriever=_FakeRetriever(), source_store=SourceStore())
     r = pipe.ingest_text(MD, source="d.md", fmt="md", doc_id="DOC")
     assert isinstance(r, IngestReport) and r.skipped is False and r.chunks > 0 and r.doc_id == "DOC"
@@ -523,7 +523,7 @@ def test_ask_result_shape():
     """ask returns an AskResult: answer text + sources (list[SourceRef], n starts at 1); no hits -> sources == []."""
     import asyncio
 
-    from agentbuilder.rag import AskResult, RagRetriever, SourceRef
+    from agentmaker.rag import AskResult, RagRetriever, SourceRef
     res = asyncio.run(RagRetriever(_SearchRetriever(), _GetStore(), _FakeLLM("答案")).ask("Q", top_k=2))
     assert isinstance(res, AskResult) and res.answer == "答案"
     assert res.sources and all(isinstance(s, SourceRef) for s in res.sources) and res.sources[0].n == 1
@@ -536,8 +536,8 @@ def test_ask_result_shape():
 
 
 def test_rag_dataclasses_exported_from_top_level():
-    """The three RAG output types are importable from the agentbuilder top level (public API)."""
-    from agentbuilder import AskResult, IngestReport, SourceRef
+    """The three RAG output types are importable from the agentmaker top level (public API)."""
+    from agentmaker import AskResult, IngestReport, SourceRef
     assert IngestReport and AskResult and SourceRef
 
 
@@ -563,8 +563,8 @@ def test_source_store_get_doc_chunks_ordered_and_ranged():
 
 def test_neighbor_window_expander_merges_and_dedupes():
     """Neighbor-window expansion: a hit chunk expands to merge ±1 neighbors; when two hit windows overlap they dedupe by (doc_id, idx), no repeated content."""
-    from agentbuilder.rag import NeighborWindowExpander
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag import NeighborWindowExpander
+    from agentmaker.retrieval.types import RetrievalResult
     s = SourceStore()
     s.save_chunks([Chunk(content=f"c{i}", chunk_id=f"id{i}", doc_id="D", index=i) for i in range(4)], scope=RAG)
     ex = NeighborWindowExpander(window=1)
@@ -579,8 +579,8 @@ def test_neighbor_window_expander_merges_and_dedupes():
 
 def test_retrieve_applies_expander():
     """With RagRetriever(expander=) injected, retrieve's hits are expanded (metadata carries index to support locating them)."""
-    from agentbuilder.rag import NeighborWindowExpander, RagRetriever
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag import NeighborWindowExpander, RagRetriever
+    from agentmaker.retrieval.types import RetrievalResult
     s = SourceStore()
     s.save_chunks([Chunk(content=f"c{i}", chunk_id=f"id{i}", doc_id="D", index=i) for i in range(3)], scope=RAG)
 
@@ -597,7 +597,7 @@ def test_retrieve_applies_expander():
 
 def test_markdown_code_fence_lines_not_treated_as_headings():
     """A line starting with # inside a code fence is a code comment, not a heading -- not mis-split, code kept intact, real heading levels undisturbed."""
-    from agentbuilder.rag.splitter import MarkdownSplitter
+    from agentmaker.rag.splitter import MarkdownSplitter
     md = (
         "# Title\n\nIntro.\n\n"
         "```python\n"
@@ -617,7 +617,7 @@ def test_markdown_code_fence_lines_not_treated_as_headings():
 
 def test_markdown_unclosed_fence_extends_to_end():
     """An unclosed code fence extends to end-of-document per CommonMark; subsequent # lines are no longer treated as headings."""
-    from agentbuilder.rag.splitter import MarkdownSplitter
+    from agentmaker.rag.splitter import MarkdownSplitter
     md = "# Title\n\n```\n# still code\n## still code\nmore"
     secs = MarkdownSplitter()._split_by_heading(md)
     assert [p for p, _ in secs] == ["Title"]                          # no new section after the fence
@@ -646,9 +646,9 @@ def test_fingerprint_includes_format_reimport_not_skipped():
 
 def test_retrieve_large_top_k_passes_candidate_pool():
     """The single-query path passes candidate_pool >= top_k: a top_k larger than the default candidate pool no longer raises RetrievalError."""
-    from agentbuilder.rag import RagRetriever
-    from agentbuilder.retrieval.hybrid import require_valid_top_k
-    from agentbuilder.retrieval.types import RetrievalResult
+    from agentmaker.rag import RagRetriever
+    from agentmaker.retrieval.hybrid import require_valid_top_k
+    from agentmaker.retrieval.types import RetrievalResult
 
     class _StrictRetriever:
         def search(self, query, *, top_k=5, candidate_pool=20, scope=None):

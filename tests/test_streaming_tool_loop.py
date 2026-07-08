@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentbuilder import Agent, LLMResponse, Tool, ToolParameter, ToolResponse
-from agentbuilder.core.adapters.openai_compat import _StreamState
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, LLMResponse, Tool, ToolParameter, ToolResponse
+from agentmaker.core.adapters.openai_compat import _StreamState
+from agentmaker.testing import ScriptedLLM
 
 
 class EchoTool(Tool):
@@ -127,7 +127,7 @@ def test_openai_stream_state_no_tools_returns_none():
 @pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="requires OPENAI_API_KEY for a real streaming tool smoke test")
 def test_real_openai_streaming_tool_loop_smoke():
     """Real smoke: gpt-4o-mini streams a call to the echo tool then answers token by token (verifies delta.tool_calls accumulation is actually correct)."""
-    from agentbuilder import LLMClient
+    from agentmaker import LLMClient
 
     llm = LLMClient("openai", model="gpt-4o-mini")
     tool = EchoTool()

@@ -1,11 +1,11 @@
-"""Regression net for the agentbuilder.prompts registry: template rendering / override validation / the registry / Agent get_prompts and update_prompts propagation.
+"""Regression net for the agentmaker.prompts registry: template rendering / override validation / the registry / Agent get_prompts and update_prompts propagation.
 
 Hermetic (no network, no key): builds an Agent with a stub LLM and only checks prompt get / list / override and protocol protection.
 """
 
 import pytest
 
-from agentbuilder.prompts import DEFAULT_PROMPTS, PromptError, PromptRegistry, PromptTemplate
+from agentmaker.prompts import DEFAULT_PROMPTS, PromptError, PromptRegistry, PromptTemplate
 
 
 class _StubLLM:
@@ -107,7 +107,7 @@ def test_protocol_protected_defaults():
 
 def test_agent_get_and_update_prompts_propagate():
     """update_prompts mutates in place; the agent and its harness share one registry and it takes effect immediately; a missing protocol marker is rejected."""
-    from agentbuilder.agents.agent import Agent
+    from agentmaker.agents.agent import Agent
     a = Agent("t", _StubLLM(), prompts=DEFAULT_PROMPTS.copy())          # isolate with a copy so the global isn't polluted
     d = a.get_prompts()
     assert "chat.persona" in d and len(d) > 40
@@ -120,7 +120,7 @@ def test_agent_get_and_update_prompts_propagate():
 
 def test_agent_default_prompts_isolated_per_instance():
     """Without prompts=, each Agent copies DEFAULT_PROMPTS at construction: update_prompts calls don't cross-contaminate and don't touch the global."""
-    from agentbuilder.agents.agent import Agent
+    from agentmaker.agents.agent import Agent
     original = DEFAULT_PROMPTS.text("chat.persona")
     a = Agent("a", _StubLLM())                                       # no prompts= -> isolated by default
     b = Agent("b", _StubLLM())
@@ -143,7 +143,7 @@ def test_override_with_prompt_template_still_validated():
 
 def test_build_agent_threads_prompts():
     """The declarative path build_agent threads spec.prompts through to the agent and its harness (isolated overrides work via spec too)."""
-    from agentbuilder import AgentSpec, LLMClient, build_agent
+    from agentmaker import AgentSpec, LLMClient, build_agent
     eng = DEFAULT_PROMPTS.copy()
     a = build_agent(AgentSpec(name="a", model=LLMClient("deepseek", api_key="x"), prompts=eng))
     assert a.prompts is eng and a.harness.prompts is eng
@@ -152,8 +152,8 @@ def test_build_agent_threads_prompts():
 def test_update_prompts_does_not_touch_separately_built_tool():
     """Boundary: agent.update_prompts only affects the agent's own chain; a separately constructed tool is unaffected --
     to localize such a tool, pass it prompts= or override globally before constructing it."""
-    from agentbuilder import CalculatorTool
-    from agentbuilder.agents.agent import Agent
+    from agentmaker import CalculatorTool
+    from agentmaker.agents.agent import Agent
     a = Agent("a", _StubLLM(), prompts=DEFAULT_PROMPTS.copy())          # isolate with a copy so the global isn't polluted
     independent = CalculatorTool()                                  # independent tool: reads the global DEFAULT_PROMPTS (unchanged)
     a.update_prompts({"tool.desc.calculator": "EN calc desc"})      # only mutates the agent's copy
@@ -163,9 +163,9 @@ def test_update_prompts_does_not_touch_separately_built_tool():
 
 
 def test_chinese_pack_complete_and_valid():
-    """The ready-made Chinese pack agentbuilder.prompts.packs.CHINESE_PROMPTS covers every key and passes override validation (placeholders/protocol markers intact); and the default (English) catalog itself contains no Chinese."""
+    """The ready-made Chinese pack agentmaker.prompts.packs.CHINESE_PROMPTS covers every key and passes override validation (placeholders/protocol markers intact); and the default (English) catalog itself contains no Chinese."""
     import re
-    from agentbuilder.prompts.packs import CHINESE_PROMPTS, chinese_registry
+    from agentmaker.prompts.packs import CHINESE_PROMPTS, chinese_registry
     assert set(CHINESE_PROMPTS) == set(DEFAULT_PROMPTS.keys())      # one-to-one with the registry: nothing missing / nothing extra
     chinese_registry()                                              # overriding validates placeholders + protocol markers; invalid ones raise PromptError
     cjk = re.compile(r"[一-鿿　-〿]")
@@ -181,9 +181,9 @@ def test_tool_status_messages_go_through_prompts():
     """
     import re
     cjk = re.compile(r"[一-鿿　-〿]")
-    from agentbuilder import (CalculatorTool, CLITool, MemoryTool, NotesTool, RAGTool, SearchTool)
-    from agentbuilder.runtime.sessions import ConversationSearchTool
-    from agentbuilder.tools.tool_retriever import ToolSearchTool
+    from agentmaker import (CalculatorTool, CLITool, MemoryTool, NotesTool, RAGTool, SearchTool)
+    from agentmaker.runtime.sessions import ConversationSearchTool
+    from agentmaker.tools.tool_retriever import ToolSearchTool
     eng = {}
     for k in DEFAULT_PROMPTS.keys():
         t = DEFAULT_PROMPTS.get(k)
@@ -223,9 +223,9 @@ def test_full_english_switch_leaves_no_chinese():
     import json
     import re
     cjk = re.compile(r"[一-鿿　-〿]")
-    from agentbuilder import (CLITool, CalculatorTool, Harness, NotesTool, PlanAgent,
+    from agentmaker import (CLITool, CalculatorTool, Harness, NotesTool, PlanAgent,
                         ReflectionAgent, SearchTool, ToolPermissions, ToolRegistry)
-    from agentbuilder.runtime.harness import _validate_structured
+    from agentmaker.runtime.harness import _validate_structured
     eng = {}
     for k in DEFAULT_PROMPTS.keys():                      # each key -> pure ASCII, keeping placeholders + protocol markers
         t = DEFAULT_PROMPTS.get(k)
@@ -262,7 +262,7 @@ def test_full_english_switch_leaves_no_chinese():
 
 def test_reflection_pass_signal_tracks_override():
     """Localization: after overriding reflection.pass_signal, both the reflect prompt and the _passed check use the same new signal (no hardcoded "good enough")."""
-    from agentbuilder import ReflectionAgent
+    from agentmaker import ReflectionAgent
     a = ReflectionAgent("r", _StubLLM(), prompts=DEFAULT_PROMPTS.copy())
     a.update_prompts({"reflection.pass_signal": "DONE"})
     prompt = a._reflect_prompt("task", [{"kind": "draft", "text": "d"}])

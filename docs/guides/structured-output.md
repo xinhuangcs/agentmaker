@@ -9,8 +9,8 @@ Pass a Pydantic model as `output_schema` to `run()`. The completed `RunResult` c
 ```python
 from pydantic import BaseModel
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 class Person(BaseModel):
@@ -25,12 +25,12 @@ person = agent.run("Extract the person from: Ada is 36.", output_schema=Person).
 print(f"{type(person).__name__}(name={person.name!r}, age={person.age})")
 ```
 
-This is [`examples/03_structured_output.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/03_structured_output.py), copied verbatim. It runs with no API key and no network: `ScriptedLLM` is the framework's test double (a stand-in that replays canned replies instead of calling a real model), and here it returns the JSON object directly, which the framework parses and validates into a `Person`. `person` is a real `Person` instance, so `person.name` and `person.age` are typed attributes, not dictionary lookups.
+This is [`examples/03_structured_output.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/03_structured_output.py), copied verbatim. It runs with no API key and no network: `ScriptedLLM` is the framework's test double (a stand-in that replays canned replies instead of calling a real model), and here it returns the JSON object directly, which the framework parses and validates into a `Person`. `person` is a real `Person` instance, so `person.name` and `person.age` are typed attributes, not dictionary lookups.
 
 To run against a real model, swap the test double for a live client and keep everything else the same:
 
 ```python
-from agentbuilder import LLMClient
+from agentmaker import LLMClient
 
 agent = Agent("extractor", LLMClient("deepseek"))
 person = agent.run("Extract the person from: Ada is 36.", output_schema=Person).final_output
@@ -94,7 +94,7 @@ person = agent.run(
 If the model cannot produce a valid object within the retry budget, the framework raises `LLMResponseError` with the last validation error. Handle it where you would handle any other model-call failure:
 
 ```python
-from agentbuilder import LLMResponseError
+from agentmaker import LLMResponseError
 
 try:
     person = agent.run("...", output_schema=Person).final_output

@@ -6,7 +6,7 @@ building and running it needs an API key, so here we only construct and inspect 
 
     uv run python examples/15_declarative_spec.py
 """
-from agentbuilder import AgentSpec, tool
+from agentmaker import AgentSpec, tool
 
 
 @tool
@@ -21,7 +21,7 @@ print(f"spec: name={spec.name!r} strategy={spec.strategy!r} "
       f"model={spec.model!r} tools={[t.name for t in spec.tools]}")
 
 # To build and run it (needs the provider's API key in your environment):
-#     from agentbuilder import build_agent
+#     from agentmaker import build_agent
 #     agent = build_agent(spec)              # resolves model="deepseek" to a real LLMClient
 #     print(agent.run("what time is it?").final_output)
 print("build with: agent = build_agent(spec)  # needs DEEPSEEK_API_KEY to run")

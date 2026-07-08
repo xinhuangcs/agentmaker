@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide builds a working agent in a dozen lines: a function becomes a tool, a scripted test model stands in for a real LLM (so it runs with no API key and no network), and the agent runs one "model calls tools in a loop" turn and hands back a final answer. Read it first if you are new to agentbuilder; every other guide assumes you have this shape in your head. It walks through [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/01_quickstart.py) line by line, then shows how to swap the test model for a real provider.
+This guide builds a working agent in a dozen lines: a function becomes a tool, a scripted test model stands in for a real LLM (so it runs with no API key and no network), and the agent runs one "model calls tools in a loop" turn and hands back a final answer. Read it first if you are new to agentmaker; every other guide assumes you have this shape in your head. It walks through [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/01_quickstart.py) line by line, then shows how to swap the test model for a real provider.
 
 ## The whole program
 
@@ -11,8 +11,8 @@ uv run python examples/01_quickstart.py
 ```
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -77,7 +77,7 @@ llm = ScriptedLLM([
 ])
 ```
 
-`ScriptedLLM` is a test double: it emits preset responses in call order instead of contacting a provider, so agent tests run with no cost and no network. It lives in `agentbuilder.testing`, which is not part of the top-level public surface, so import it explicitly with `from agentbuilder.testing import ScriptedLLM`.
+`ScriptedLLM` is a test double: it emits preset responses in call order instead of contacting a provider, so agent tests run with no cost and no network. It lives in `agentmaker.testing`, which is not part of the top-level public surface, so import it explicitly with `from agentmaker.testing import ScriptedLLM`.
 
 Each entry in the script list is either:
 
@@ -142,7 +142,7 @@ print(result.usage.tool_calls)             # 1 (get_weather ran once)
 The only line that changes is the LLM. Replace `ScriptedLLM(...)` with an `LLMClient`, and now the model itself decides when to call `get_weather`:
 
 ```python
-from agentbuilder import Agent, LLMClient, tool
+from agentmaker import Agent, LLMClient, tool
 
 
 @tool
@@ -179,9 +179,9 @@ Everything else stays the same: the `@tool` definition, the `Agent` construction
 The agent above is deliberately minimal. Every other capability is a few more arguments to the same constructor, each one optional. Here is that agent given semantic long-term memory, a model-invoked skill library, retrieved context, and an input guardrail:
 
 ```python
-from agentbuilder import (Agent, LLMClient, Memory, MemoryStore, ContextBuilder,
+from agentmaker import (Agent, LLMClient, Memory, MemoryStore, ContextBuilder,
                           CallableSource, SkillLoader, CallableGuardrail)
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 llm = LLMClient("openai")
 memory = Memory(build_sqlite_hybrid(OpenAIEmbedder()), MemoryStore())
@@ -211,15 +211,15 @@ You add these one at a time, not all at once, and the same pattern reaches the r
 For development, attach the trace-based agent debugger. A `Tracer` records every step of a run, and `DoctorHook` turns a failed run into an LLM-written diagnosis (first bad step, root cause, suggested fix) printed straight to your terminal:
 
 ```python
-from agentbuilder import Agent, Tracer
-from agentbuilder.devtools import DoctorHook
+from agentmaker import Agent, Tracer
+from agentmaker.devtools import DoctorHook
 
 tracer = Tracer()
 agent = Agent("assistant", llm, tools=[get_weather], tracer=tracer, hooks=[DoctorHook(tracer)])
 print(agent.run("What's the weather in Copenhagen?").final_output)
 ```
 
-`DoctorHook` and the standalone Trace Detective (`python -m agentbuilder.devtools`, a local web UI over recorded runs) are themselves agentbuilder agents, so the framework debugs its own runs. See [Observability](observability.md) for tracing, exporters, and the Trace Detective UI.
+`DoctorHook` and the standalone Trace Detective (`python -m agentmaker.devtools`, a local web UI over recorded runs) are themselves agentmaker agents, so the framework debugs its own runs. See [Observability](observability.md) for tracing, exporters, and the Trace Detective UI.
 
 ## Where to go next
 

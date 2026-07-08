@@ -11,7 +11,7 @@ The design is drift-proof: each subsystem reads its prompts by key from an injec
 All four names come straight off the top-level package:
 
 ```python
-from agentbuilder import DEFAULT_PROMPTS, PromptRegistry, PromptTemplate, PromptError
+from agentmaker import DEFAULT_PROMPTS, PromptRegistry, PromptTemplate, PromptError
 ```
 
 A registry answers a few direct questions. `keys()` lists every registered prompt name, `text(key)` returns the current template text, `render(key, **kw)` fills its placeholders, and `as_dict()` returns a `{key: text}` snapshot for printing or export:
@@ -62,7 +62,7 @@ A **protocol token** is a literal string the framework's parser depends on, such
 When you override a prompt, the registry validates that every declared placeholder and every protocol token is still present in your new text. If one is missing, the override is rejected up front with `PromptError`, moving a failure that would otherwise only surface at run time forward to the moment you make the change:
 
 ```python
-from agentbuilder import PromptError
+from agentmaker import PromptError
 
 # Valid: the required {query} placeholder is preserved, so this override is accepted.
 agent.update_prompts({"context.current_question": "[User asks]\n{query}"})
@@ -74,7 +74,7 @@ except PromptError as exc:
     print(exc)   # Invalid prompt override: missing placeholder ['query']
 ```
 
-`PromptError` inherits from `AgentbuilderError`, so you can catch it alongside the framework's other errors.
+`PromptError` inherits from `AgentmakerError`, so you can catch it alongside the framework's other errors.
 
 If you build templates directly, `PromptTemplate` exposes the same guarantees. Its constructor takes the text plus optional `variables` and `protected` tuples; `render(**kwargs)` fills the placeholders, and `with_text(new_template)` returns a copy with different text but the same constraints, raising `PromptError` if the new text drops a placeholder or protocol token:
 
@@ -86,11 +86,11 @@ reworded = tpl.with_text("Please answer the following.\n{query}")   # keeps {que
 
 ## The Chinese language pack
 
-The framework defaults to English, and ships a complete Chinese pack that overrides every built-in prompt in one call while preserving each prompt's placeholders and protocol tokens. Applying it is instant: it is pure text substitution, with no model call. The pack lives in `agentbuilder.prompts.packs` as `CHINESE_PROMPTS` (the raw `{key: text}` mapping) and `chinese_registry()` (a helper that returns a fresh Chinese registry). This is [`examples/08_prompt_packs.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/08_prompt_packs.py), copied verbatim:
+The framework defaults to English, and ships a complete Chinese pack that overrides every built-in prompt in one call while preserving each prompt's placeholders and protocol tokens. Applying it is instant: it is pure text substitution, with no model call. The pack lives in `agentmaker.prompts.packs` as `CHINESE_PROMPTS` (the raw `{key: text}` mapping) and `chinese_registry()` (a helper that returns a fresh Chinese registry). This is [`examples/08_prompt_packs.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/08_prompt_packs.py), copied verbatim:
 
 ```python
-from agentbuilder import DEFAULT_PROMPTS
-from agentbuilder.prompts.packs import CHINESE_PROMPTS, chinese_registry
+from agentmaker import DEFAULT_PROMPTS
+from agentmaker.prompts.packs import CHINESE_PROMPTS, chinese_registry
 
 # The default registry is English.
 print("default (English):", DEFAULT_PROMPTS.text("context.section.memory"))
@@ -111,8 +111,8 @@ The two options reflect a real distinction between the registry's two override m
 - **`with_overrides` (per registry, isolated).** `chinese_registry()` calls `DEFAULT_PROMPTS.with_overrides(CHINESE_PROMPTS)`, which returns a brand-new catalog with the pack applied and leaves the global `DEFAULT_PROMPTS` untouched. Pass that registry to an agent via `prompts=`, and only that agent speaks Chinese:
 
     ```python
-    from agentbuilder import Agent
-    from agentbuilder.prompts.packs import chinese_registry
+    from agentmaker import Agent
+    from agentmaker.prompts.packs import chinese_registry
 
     agent = Agent("assistant", llm, prompts=chinese_registry())
     ```
@@ -132,7 +132,7 @@ To support another language, copy the Chinese pack file and translate each value
 Third-party strategies and tools can bring their own prompts into the same enumerable, overridable, translatable system. `register(key, template, *, variables=(), protected=())` adds a new entry. Use a namespace prefix on the key to avoid clashing with the framework's built-in names, and register on a copy so you do not mutate the global default:
 
 ```python
-from agentbuilder import Agent, DEFAULT_PROMPTS
+from agentmaker import Agent, DEFAULT_PROMPTS
 
 reg = DEFAULT_PROMPTS.copy()
 reg.register("myapp.greeting", "Greet {name} warmly and offer help.", variables=("name",))

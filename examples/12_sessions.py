@@ -5,8 +5,8 @@ later turn can reference an earlier one. Hermetic (in-memory SQLite).
 
     uv run python examples/12_sessions.py
 """
-from agentbuilder import Agent, Scope, SqliteSessionStore
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, Scope, SqliteSessionStore
+from agentmaker.testing import ScriptedLLM
 
 store = SqliteSessionStore()                       # in-memory by default
 scope = Scope(user="alice", session="chat-1")      # which conversation this is

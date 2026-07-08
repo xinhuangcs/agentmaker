@@ -7,10 +7,10 @@ import time
 
 import pytest
 
-from agentbuilder import Agent, RunPolicy
-from agentbuilder.core.exceptions import RunCancelled, RunLimitExceeded
-from agentbuilder.core.llm_response import LLMResponse
-from agentbuilder.tools import Tool, ToolResponse
+from agentmaker import Agent, RunPolicy
+from agentmaker.core.exceptions import RunCancelled, RunLimitExceeded
+from agentmaker.core.llm_response import LLMResponse
+from agentmaker.tools import Tool, ToolResponse
 
 
 class _LoopLLM:

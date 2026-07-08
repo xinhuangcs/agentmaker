@@ -1,8 +1,8 @@
-site_name: agentbuilder
+site_name: agentmaker
 site_description: A general-purpose framework for building LLM agents, with tools, skills, memory, RAG, context engineering, guardrails, HITL, and observability.
-site_url: https://xinhuangcs.github.io/agentbuilder/
-repo_url: https://github.com/xinhuangcs/agentbuilder
-repo_name: xinhuangcs/agentbuilder
+site_url: https://xinhuangcs.github.io/agentmaker/
+repo_url: https://github.com/xinhuangcs/agentmaker
+repo_name: xinhuangcs/agentmaker
 
 theme:
   name: material
@@ -29,7 +29,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [src]        # src-layout: import agentbuilder from src/ for the API reference
+          paths: [src]        # src-layout: import agentmaker from src/ for the API reference
           options:
             show_source: false
             members_order: source
@@ -57,10 +57,10 @@ markdown_extensions:
 extra:
   alternate:
     - name: English
-      link: /agentbuilder/
+      link: /agentmaker/
       lang: en
     - name: 中文
-      link: /agentbuilder/zh/
+      link: /agentmaker/zh/
       lang: zh
 
 nav:

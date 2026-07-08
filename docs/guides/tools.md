@@ -2,11 +2,11 @@
 
 Tools are the functions your agent can call. A tool exposes a name, a description, and a typed parameter list; the model uses **function calling** (the mechanism by which the model emits a structured request to run a named tool with arguments) to invoke it, and the framework runs the tool and feeds the result back. This guide covers defining tools (the one-line `@tool` decorator or a `Tool` subclass), returning results with `ToolResponse`, grouping tools in a `ToolRegistry`, the built-in tools, permission and confirmation gates, connecting external MCP servers, and selecting from a large tool set at runtime with Tool-RAG.
 
-Everything on this page runs with the [Agent](agents.md) loop. The full runnable example is [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/02_tools_and_registry.py):
+Everything on this page runs with the [Agent](agents.md) loop. The full runnable example is [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/02_tools_and_registry.py):
 
 ```python
-from agentbuilder import Agent, CalculatorTool, ToolRegistry, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, CalculatorTool, ToolRegistry, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -46,7 +46,7 @@ Both styles work. Use `Annotated[T, "description"]` to attach a per-parameter de
 
 ```python
 from typing import Annotated
-from agentbuilder import tool
+from agentmaker import tool
 
 
 @tool
@@ -85,7 +85,7 @@ You can also name a tool explicitly with `@tool(name=..., description=...)`; the
 When you need state, a custom schema, or logic the decorator cannot express, subclass `Tool` directly. Implement `get_parameters()` (return a list of `ToolParameter`) and `run()` (return a `ToolResponse`):
 
 ```python
-from agentbuilder import Tool, ToolParameter, ToolResponse
+from agentmaker import Tool, ToolParameter, ToolResponse
 
 
 class ReverseTool(Tool):
@@ -147,7 +147,7 @@ Returning `ToolResponse.error(...)` is the idiomatic way to report a recoverable
 A `ToolRegistry` holds the tools an agent may call, keyed by name. `register` one at a time, or `register_all` in a batch:
 
 ```python
-from agentbuilder import ToolRegistry, CalculatorTool, SearchTool
+from agentmaker import ToolRegistry, CalculatorTool, SearchTool
 
 registry = ToolRegistry()
 registry.register(CalculatorTool())
@@ -192,7 +192,7 @@ The framework ships a few general-purpose tools with no business logic.
 Evaluates math expressions safely by parsing them into an abstract syntax tree and evaluating only whitelisted operators, so there is no `eval` and no arbitrary code execution. It supports `+ - * / // % **`, unary sign, the functions `sqrt`, `abs`, `round`, `log`, `sin`, `cos`, and the constants `pi` and `e`. It has one parameter, `expression`, and needs no constructor arguments (like every built-in, it accepts an optional `prompts=` to localize its user-facing strings):
 
 ```python
-from agentbuilder import CalculatorTool
+from agentmaker import CalculatorTool
 
 registry.register(CalculatorTool())   # tool name: "calculator"
 ```
@@ -202,7 +202,7 @@ registry.register(CalculatorTool())   # tool name: "calculator"
 Web search with automatic multi-source fallback: it tries Tavily, then DuckDuckGo, then Brave, then SerpAPI, moving to the next source whenever one has no library installed, no key configured, or fails. Only if all fail does it return an error. Keys are read from the environment (`TAVILY_API_KEY`, `BRAVE_API_KEY`, `SERPAPI_API_KEY`); DuckDuckGo needs no key. It has one parameter, `query`.
 
 ```python
-from agentbuilder import SearchTool
+from agentmaker import SearchTool
 
 registry.register(SearchTool(max_results=5))   # tool name: "search"
 ```
@@ -214,7 +214,7 @@ registry.register(SearchTool(max_results=5))   # tool name: "search"
 Wraps "run one allowlisted local command" as a tool. Because a CLI is high-risk, safety is the core design: it is deny-by-default (only programs you list are allowed), never uses `shell=True` (arguments are tokenized with `shlex` and unquoted shell operators are refused), applies a dangerous-argument gate against high-risk flags, passes only a minimal environment (`PATH`, `HOME`, `LANG`) so secrets from `.env` never leak back through command output, and enforces a timeout plus output truncation. It is marked `requires_confirmation = True`. Its tool name is `shell` and it takes one parameter, `command`.
 
 ```python
-from agentbuilder import CLITool
+from agentmaker import CLITool
 
 registry.register(CLITool(allowed_commands=["git", "ls", "grep"], timeout=10.0, max_output_chars=4000))
 ```
@@ -226,7 +226,7 @@ You can override the dangerous-argument gate with the `arg_policy` callback, and
 Lets an agent read and append a note file within a restricted directory, so it can keep progress, plans, and decisions across sessions. All reads and writes are confined to the `root` you give at construction: any path that escapes after resolution (`..`, an absolute path, or a symlink escape) is refused. Its tool name is `notes`, and its parameters are `action` (`read` or `append`), `path` (relative to `root`), and `content` (for `append`).
 
 ```python
-from agentbuilder import NotesTool
+from agentmaker import NotesTool
 
 registry.register(NotesTool(root="./agent_notes"))
 ```
@@ -238,7 +238,7 @@ registry.register(NotesTool(root="./agent_notes"))
 Tools flagged `requires_confirmation` (or those, like `NotesTool`, that decide per action) must clear a confirmation callback before they run. The callback has the signature `(tool, parameters) -> bool`; the tool runs only when it returns `True`. Pass it to the agent as `confirm`:
 
 ```python
-from agentbuilder import Agent, cli_confirm
+from agentmaker import Agent, cli_confirm
 
 agent = Agent("assistant", llm, tools=[CLITool(allowed_commands=["ls"])], confirm=cli_confirm)
 ```
@@ -258,7 +258,7 @@ The decision rule is "deny wins, then an allowlist restricts":
 `allow=None` means that dimension enables no allowlist ("no restriction"); `allow=[]` means an empty allowlist that denies everything. Pass a `ToolPermissions` to the agent as `permissions`:
 
 ```python
-from agentbuilder import Agent, ToolPermissions
+from agentmaker import Agent, ToolPermissions
 
 permissions = ToolPermissions(allow_origins={"builtin"}, deny={"shell"})
 agent = Agent("assistant", llm, tool_registry=registry, permissions=permissions)
@@ -268,12 +268,12 @@ Permissions are enforced at the execution gate: a denied tool is rejected outrig
 
 ## MCP integration
 
-MCP (Model Context Protocol, Anthropic's open standard for exposing tools to models, sometimes called "USB-C for AI") lets you connect a server that publishes a set of tools and adapt each one into an agentbuilder `Tool`. `MCPClient` manages the connection and lists the tools; each becomes an `MCPTool` you register like any other tool. `mcp` is an optional dependency (`uv add mcp`), imported lazily.
+MCP (Model Context Protocol, Anthropic's open standard for exposing tools to models, sometimes called "USB-C for AI") lets you connect a server that publishes a set of tools and adapt each one into an agentmaker `Tool`. `MCPClient` manages the connection and lists the tools; each becomes an `MCPTool` you register like any other tool. `mcp` is an optional dependency (`uv add mcp`), imported lazily.
 
 Two transports are supported. Use `async with` to manage the connection lifecycle, and call the tools while the block is alive:
 
 ```python
-from agentbuilder import MCPClient, ToolRegistry
+from agentmaker import MCPClient, ToolRegistry
 
 registry = ToolRegistry()
 
@@ -305,7 +305,7 @@ Registering with `on_conflict="skip"` (rather than raising on the first name col
 Once an agent has many tools, putting every tool's full schema in the prompt is expensive and degrades accuracy. Tool-RAG (RAG is retrieval-augmented generation, retrieving relevant items instead of sending everything) retrieves only the most relevant tools for the current input and expands just that subset. `ToolRetriever` indexes each tool's name, description, and parameter names into a shared retriever and returns the top matches:
 
 ```python
-from agentbuilder import ToolRetriever
+from agentmaker import ToolRetriever
 
 # `retriever` is a HybridRetriever; see the Retrieval & RAG guide for how to build one.
 tool_retriever = ToolRetriever(registry, retriever, top_k=8, always_include=("tool_search",))
@@ -330,7 +330,7 @@ agent = Agent("assistant", llm, tool_registry=registry, tool_retriever=tool_retr
 One-shot preselection has a blind spot: in a multi-step task, which tool step two needs may depend on step one's output. `ToolSearchTool` closes that gap by making tool search itself a tool the model can call mid-run. It returns a catalog of matching tools plus a `discovered` list, and the loop merges those tools into the usable set for the rest of the run:
 
 ```python
-from agentbuilder import ToolSearchTool
+from agentmaker import ToolSearchTool
 
 registry.register(ToolSearchTool(tool_retriever, top_k=5))   # tool name: "tool_search"
 ```

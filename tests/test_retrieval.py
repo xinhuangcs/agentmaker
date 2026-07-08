@@ -10,10 +10,10 @@ import threading
 
 import pytest
 
-from agentbuilder.core.exceptions import RetrievalError
-from agentbuilder.retrieval import (Fts5KeywordIndex, HybridRetriever, OpenAIEmbedder, RetrievalResult, Scope,
+from agentmaker.core.exceptions import RetrievalError
+from agentmaker.retrieval import (Fts5KeywordIndex, HybridRetriever, OpenAIEmbedder, RetrievalResult, Scope,
                               SqliteVecStore, build_sqlite_hybrid, reciprocal_rank_fusion)
-from agentbuilder.retrieval.backends.sqlite import SqliteHybridRetriever  # internal class, not exported at the top level
+from agentmaker.retrieval.backends.sqlite import SqliteHybridRetriever  # internal class, not exported at the top level
 
 MEM = Scope(base="memory")
 
@@ -282,7 +282,7 @@ def test_embedder_batches_large_input():
 
 def test_digest_includes_metadata():
     """_digest folds in metadata (a change triggers a rewrite); empty metadata falls back to a pure-content hash (so old paths like memory keep the same fingerprint and don't trigger a full re-embed)."""
-    from agentbuilder.retrieval.index_sync import _digest
+    from agentmaker.retrieval.index_sync import _digest
     assert _digest("x") == _digest("x", None) == _digest("x", {})            # empty metadata falls back to a pure-content hash
     assert _digest("x", {"doc_id": "a"}) != _digest("x", {"doc_id": "b"})    # metadata changes -> fingerprint changes
     assert _digest("x", {"doc_id": "a"}) != _digest("x")                     # with vs without metadata -> different
@@ -290,7 +290,7 @@ def test_digest_includes_metadata():
 
 def test_contextualizer_fingerprint_tracks_prompt_and_model():
     """LLMContextualizer.fingerprint varies with prompt / model (a change on reimport isn't wrongly short-circuited by the fingerprint); the base class defaults to its class name."""
-    from agentbuilder.rag.contextualizer import HeadingContextualizer, LLMContextualizer
+    from agentmaker.rag.contextualizer import HeadingContextualizer, LLMContextualizer
     stub = type("L", (), {"model": "m"})()
     assert HeadingContextualizer().fingerprint() == "HeadingContextualizer"
     assert LLMContextualizer(stub, context_prompt="A").fingerprint() != LLMContextualizer(stub, context_prompt="B").fingerprint()
@@ -337,7 +337,7 @@ def test_search_many_batch_embeds_once():
 
 def test_metadata_filter_end_to_end():
     """With metadata columns declared: add ingests with metadatas, and search narrows both candidate paths by eq / in."""
-    from agentbuilder.retrieval import MetadataFilter
+    from agentmaker.retrieval import MetadataFilter
     hr = build_sqlite_hybrid(_FakeEmbedder(), metadata_columns=("doc_id", "tag"))
     hr.add(["c1", "c2", "c3"], ["报销制度 交通", "报销制度 住宿", "假勤制度 年假"], scope=MEM,
            metadatas=[{"doc_id": "D1", "tag": "policy"}, {"doc_id": "D1", "tag": "policy"},
@@ -352,7 +352,7 @@ def test_metadata_filter_end_to_end():
 
 def test_metadata_filter_undeclared_key_fails_loud():
     """Filtering an undeclared field fails loud (a silent empty result is hard to debug); an illegal operator is caught at construction."""
-    from agentbuilder.retrieval import MetadataFilter
+    from agentmaker.retrieval import MetadataFilter
     hr = build_sqlite_hybrid(_FakeEmbedder(), metadata_columns=("doc_id",))
     hr.add(["c1"], ["hello"], scope=MEM, metadatas=[{"doc_id": "D1"}])
     with pytest.raises(RetrievalError):
@@ -399,7 +399,7 @@ def test_embedder_fingerprint_upgrades_unknown_model(tmp_path):
 
 def test_fusion_strategy_injectable():
     """With a custom FusionStrategy injected, hybrid's fusion uses it (not the hardwired RRF); the default is still RRFFusion."""
-    from agentbuilder.retrieval import FusionStrategy, RRFFusion
+    from agentmaker.retrieval import FusionStrategy, RRFFusion
 
     class _TakeKeywordOnly(FusionStrategy):
         def fuse(self, result_lists, *, top_k):
@@ -448,7 +448,7 @@ class _CountingRetriever:
 
 def test_sqlite_bookkeeping_idempotent_across_instances(tmp_path):
     """Persistent bookkeeping: rewriting the same content in a "new process" (fresh SyncIndexSync + same bookkeeping DB) is still skipped by the fingerprint, no repeat embedding."""
-    from agentbuilder.retrieval import SqliteBookkeeping, SyncIndexSync
+    from agentmaker.retrieval import SqliteBookkeeping, SyncIndexSync
     db = str(tmp_path / "bk.db")
     r1 = _CountingRetriever()
     s1 = SyncIndexSync(r1, bookkeeping=SqliteBookkeeping(db))
@@ -464,7 +464,7 @@ def test_sqlite_bookkeeping_idempotent_across_instances(tmp_path):
 
 def test_sqlite_bookkeeping_pending_survives_restart(tmp_path):
     """A failed write is marked pending: the pending set is persisted, still visible after a restart, and cleared once reconcile converges."""
-    from agentbuilder.retrieval import SqliteBookkeeping, SyncIndexSync
+    from agentmaker.retrieval import SqliteBookkeeping, SyncIndexSync
     from collections import namedtuple
     db = str(tmp_path / "bk2.db")
     r = _CountingRetriever()
@@ -506,7 +506,7 @@ def test_sqlite_vec_store_zero_dim_fails_loud():
 
 def test_hybrid_rejects_invalid_config_at_construction():
     """Invalid config (negative rrf_k / candidate_pool < top_k) is rejected at construction, not deferred to search time."""
-    from agentbuilder.retrieval import RetrievalConfig
+    from agentmaker.retrieval import RetrievalConfig
     with pytest.raises(ValueError):
         HybridRetriever(_FakeEmbedder(), SqliteVecStore(dim=3), _BoomKeyword(),
                         config=RetrievalConfig(rrf_k=-1))
@@ -514,7 +514,7 @@ def test_hybrid_rejects_invalid_config_at_construction():
 
 def test_metadata_filter_eq_rejects_none():
     """A MetadataFilter with op='eq' can't have a None value (in SQL, = NULL is always false -> a silent zero-hit)."""
-    from agentbuilder.retrieval import MetadataFilter
+    from agentmaker.retrieval import MetadataFilter
     with pytest.raises(RetrievalError):
         MetadataFilter("doc_id", None)                             # eq None -> fail loud
     with pytest.raises(RetrievalError):
@@ -531,7 +531,7 @@ class _NoopRetriever:
 
 def test_reconcile_clears_ghost_pending():
     """An id marked pending on failure and then deleted from the source (a ghost): one reconcile stops it lingering in pending() forever."""
-    from agentbuilder.retrieval import SyncIndexSync
+    from agentmaker.retrieval import SyncIndexSync
     sync = SyncIndexSync(_NoopRetriever())
     sync.bookkeeping.mark_pending(MEM, ["ghost"])                  # best-effort write failure marks it pending
     assert "ghost" in sync.pending(scope=MEM)
@@ -541,7 +541,7 @@ def test_reconcile_clears_ghost_pending():
 
 def test_inmemory_bookkeeping_normalizes_none_scope():
     """InMemoryBookkeeping normalizes None to Scope(), matching SqliteBookkeeping (behavior doesn't drift across backends)."""
-    from agentbuilder.retrieval import InMemoryBookkeeping
+    from agentmaker.retrieval import InMemoryBookkeeping
     bk = InMemoryBookkeeping()
     bk.set_hashes(None, [("x", "h1")])                            # write with a None scope
     assert bk.get_hash(Scope(), "x") == "h1"                      # read via Scope() (same bucket)

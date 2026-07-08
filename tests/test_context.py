@@ -1,4 +1,4 @@
-"""Regression net for the agentbuilder/context subsystem (hermetic: local hand-built data, no key / offline).
+"""Regression net for the agentmaker/context subsystem (hermetic: local hand-built data, no key / offline).
 
 Locks in the hardened edges and core paths of this subsystem:
 ContextBuilder assembly (custom source-name fallback rendering / duplicate source-name error / tokens within budget / unknown source-name error),
@@ -10,19 +10,19 @@ import asyncio
 
 import pytest
 
-from agentbuilder.context.builder import ContextBuilder
-from agentbuilder.context.history_compactor import HistoryCompactor
-from agentbuilder.context.mmr import _cosine, _normalize, mmr_select
-from agentbuilder.context.reducer import reduce_agent, reduce_plan, reduce_reflection, tokens_of
-from agentbuilder.context.window_budget import WindowBudget, WindowBudgetConfig
-from agentbuilder.context.sources import CallableSource
-from agentbuilder.context.types import ContextConfig, ContextSource
-from agentbuilder.core.exceptions import ContextWindowExceeded
-from agentbuilder.core.message import Message
-from agentbuilder.core.text import count_tokens
-from agentbuilder.retrieval import RetrievalResult
-from agentbuilder.runtime.harness import Harness
-from agentbuilder.core.aio import run_sync
+from agentmaker.context.builder import ContextBuilder
+from agentmaker.context.history_compactor import HistoryCompactor
+from agentmaker.context.mmr import _cosine, _normalize, mmr_select
+from agentmaker.context.reducer import reduce_agent, reduce_plan, reduce_reflection, tokens_of
+from agentmaker.context.window_budget import WindowBudget, WindowBudgetConfig
+from agentmaker.context.sources import CallableSource
+from agentmaker.context.types import ContextConfig, ContextSource
+from agentmaker.core.exceptions import ContextWindowExceeded
+from agentmaker.core.message import Message
+from agentmaker.core.text import count_tokens
+from agentmaker.retrieval import RetrievalResult
+from agentmaker.runtime.harness import Harness
+from agentmaker.core.aio import run_sync
 
 
 def r(content, score, vec=None):
@@ -286,7 +286,7 @@ def test_history_compactor_incremental_running_summary():
         calls = 0
         async def chat(self, messages, **kw):
             seen.append(messages[0]["content"][:6])   # record whether the summary or the merge instruction was used
-            from agentbuilder.core.llm_response import LLMResponse
+            from agentmaker.core.llm_response import LLMResponse
             return LLMResponse(content="提要")
 
     c = HistoryCompactor(_RecLLM(), keep_recent=2, trigger_tokens=1)
@@ -308,7 +308,7 @@ def test_history_compactor_skips_when_below_trigger():
 
 def test_history_compactor_summary_prompt_overridable():
     """summary_prompt can be overridden via a constructor arg; if omitted it uses the public default DEFAULT_SUMMARY_PROMPT, and it really is passed as the instruction to the summarize callback."""
-    from agentbuilder.context import DEFAULT_SUMMARY_PROMPT
+    from agentmaker.context import DEFAULT_SUMMARY_PROMPT
     llm = _StubLLM("摘要")
     assert HistoryCompactor(llm).summary_prompt is DEFAULT_SUMMARY_PROMPT           # omitted = public default
     c = HistoryCompactor(llm, keep_recent=2, trigger_tokens=10, summary_prompt="SUM!")
@@ -470,17 +470,17 @@ def test_reducer_counter_threaded_through_harness():
 
 def test_run_context_layering_after_move():
     """Layering: run_context moved to runtime/execution (the home for governance, restoring real types); observability re-exports the correlation API in the reverse direction."""
-    from agentbuilder.runtime import current_run_id, current_scope, governed_chat   # sidecar governance entry point exposed via runtime
-    from agentbuilder.runtime.execution import governed_chat as gc                  # execution is the home
-    from agentbuilder.runtime.observability import correlation, current_run_id as crid   # re-exported in reverse on the trace side
+    from agentmaker.runtime import current_run_id, current_scope, governed_chat   # sidecar governance entry point exposed via runtime
+    from agentmaker.runtime.execution import governed_chat as gc                  # execution is the home
+    from agentmaker.runtime.observability import correlation, current_run_id as crid   # re-exported in reverse on the trace side
     assert governed_chat is gc and current_run_id is crid and callable(correlation) and current_scope
 
 
 def test_harness_summary_counts_toward_run_policy():
     """Reduction/compaction summaries go through call_llm -> counted against RunPolicy (no longer bypassing the limit), and RunLimitExceeded propagates rather than being swallowed into an empty summary."""
-    from agentbuilder.core.exceptions import RunLimitExceeded
-    from agentbuilder.runtime.execution.run_policy import RunPolicy
-    from agentbuilder.runtime.execution.run_context import record_llm, reset_run, start_run
+    from agentmaker.core.exceptions import RunLimitExceeded
+    from agentmaker.runtime.execution.run_policy import RunPolicy
+    from agentmaker.runtime.execution.run_context import record_llm, reset_run, start_run
     history = [f"步骤{i}：...\n结果：{i}" for i in range(1, 7)]
     llm = _BudgetLLM("摘要")
     llm.context_window = tokens_of(*history) - 1                                 # triggers reduction, the 3 recent items fit -> reaches the summary's call_llm
@@ -498,9 +498,9 @@ def test_harness_areduce_summary_counts_toward_run_policy():
     """Async path: areduce's summary (acall_llm inside the async-native reduction function) is likewise counted against RunPolicy - completed within the same event loop, so context is naturally shared."""
     import asyncio
 
-    from agentbuilder.core.exceptions import RunLimitExceeded
-    from agentbuilder.runtime.execution.run_policy import RunPolicy
-    from agentbuilder.runtime.execution.run_context import record_llm, reset_run, start_run
+    from agentmaker.core.exceptions import RunLimitExceeded
+    from agentmaker.runtime.execution.run_policy import RunPolicy
+    from agentmaker.runtime.execution.run_context import record_llm, reset_run, start_run
     history = [f"步骤{i}：...\n结果：{i}" for i in range(1, 7)]
     llm = _BudgetLLM("摘要")
     llm.context_window = tokens_of(*history) - 1                                 # same as above: triggers reduction, reaches the summary's call_llm
@@ -534,10 +534,10 @@ def test_harness_rejects_half_wired_context_injection():
 
 def test_governed_chat_counts_into_run_policy():
     """Sidecar LLM calls (governed_chat) count against the RunPolicy limit: inside a run it raises on excess; outside a run it's a no-op."""
-    from agentbuilder.core.exceptions import RunLimitExceeded
-    from agentbuilder.runtime.execution.run_policy import RunPolicy
-    from agentbuilder.runtime.execution.run_context import governed_chat
-    from agentbuilder.runtime.execution.run_context import reset_run, start_run
+    from agentmaker.core.exceptions import RunLimitExceeded
+    from agentmaker.runtime.execution.run_policy import RunPolicy
+    from agentmaker.runtime.execution.run_context import governed_chat
+    from agentmaker.runtime.execution.run_context import reset_run, start_run
 
     class _Resp:
         usage = {"total_tokens": 1}
@@ -558,7 +558,7 @@ def test_governed_chat_counts_into_run_policy():
 
 def test_governed_chat_emits_finish_reason():
     """The sidecar llm_call event matches Harness._llm_event: carries finish_reason / has_tool_calls (sidecar truncation is observable too)."""
-    from agentbuilder.runtime.execution.run_context import governed_chat
+    from agentmaker.runtime.execution.run_context import governed_chat
 
     class _Resp:
         usage = {"total_tokens": 1}
@@ -581,8 +581,8 @@ def test_governed_chat_emits_finish_reason():
 
 def test_memory_search_emits_trace_event():
     """A Memory.search with a tracer attached emits a memory_search event (query / hit count / latency)."""
-    from agentbuilder.memory import Memory, MemoryStore
-    from agentbuilder.retrieval.scope import Scope as _S
+    from agentmaker.memory import Memory, MemoryStore
+    from agentmaker.retrieval.scope import Scope as _S
 
     class _Spy:
         def __init__(self): self.events = []
@@ -601,7 +601,7 @@ def test_memory_search_emits_trace_event():
 
 def test_rag_retrieve_emits_trace_event():
     """A RagRetriever.retrieve with a tracer attached emits a rag_retrieve event."""
-    from agentbuilder.rag import RagRetriever, SourceStore
+    from agentmaker.rag import RagRetriever, SourceStore
 
     class _Spy:
         def __init__(self): self.events = []
@@ -701,7 +701,7 @@ def test_warn_and_trace_on_truncation(caplog):
     spy = _Spy()
     llm = _CapLLM(protocol="openai", context_window=None, finish_reason="length")  # turn off budget injection, test only truncation
     h = Harness(llm, tracer=spy)
-    with caplog.at_level(logging.WARNING, logger="agentbuilder.runtime.harness"):
+    with caplog.at_level(logging.WARNING, logger="agentmaker.runtime.harness"):
         asyncio.run(h.acall_llm([{"role": "user", "content": "hi"}]))
     assert any("truncated" in r.message for r in caplog.records)                        # truncation warning logged
     evt = [e for e in spy.events if e["type"] == "llm_call"][0]
@@ -712,7 +712,7 @@ def test_no_warn_on_normal_finish(caplog):
     """Normal finish (finish_reason=stop) logs no truncation warning."""
     import logging
     llm = _CapLLM(protocol="openai", context_window=None, finish_reason="stop")
-    with caplog.at_level(logging.WARNING, logger="agentbuilder.runtime.harness"):
+    with caplog.at_level(logging.WARNING, logger="agentmaker.runtime.harness"):
         asyncio.run(Harness(llm).acall_llm([{"role": "user", "content": "hi"}]))
     assert not any("truncated" in r.message for r in caplog.records)
 
@@ -720,7 +720,7 @@ def test_no_warn_on_normal_finish(caplog):
 def test_stream_truncation_observable(caplog):
     """Streaming truncation is observable too (same as non-streaming): finish_reason goes into the stream llm_call event + a warning is logged."""
     import logging
-    from agentbuilder.core.llm_response import StreamStats
+    from agentmaker.core.llm_response import StreamStats
 
     class _StreamTruncLLM:
         model = "m"
@@ -739,7 +739,7 @@ def test_stream_truncation_observable(caplog):
 
     async def _drive():
         return [p async for p in h.astream_llm([{"role": "user", "content": "hi"}])]
-    with caplog.at_level(logging.WARNING, logger="agentbuilder.runtime.harness"):
+    with caplog.at_level(logging.WARNING, logger="agentmaker.runtime.harness"):
         pieces = asyncio.run(_drive())
     assert pieces == ["部分"]
     evt = [e for e in spy.events if e["type"] == "llm_call"][0]

@@ -1,13 +1,13 @@
-# agentbuilder
+# agentmaker
 
-[![PyPI](https://img.shields.io/pypi/v/agentbuilder)](https://pypi.org/project/agentbuilder/)
-[![Python](https://img.shields.io/pypi/pyversions/agentbuilder)](https://pypi.org/project/agentbuilder/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/xinhuangcs/agentbuilder/blob/main/LICENSE)
-[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://xinhuangcs.github.io/agentbuilder/)
+[![PyPI](https://img.shields.io/pypi/v/agentmaker)](https://pypi.org/project/agentmaker/)
+[![Python](https://img.shields.io/pypi/pyversions/agentmaker)](https://pypi.org/project/agentmaker/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/xinhuangcs/agentmaker/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://xinhuangcs.github.io/agentmaker/)
 
 A general-purpose Python framework for building LLM agents and multi-agent systems, with tools, memory, retrieval / RAG, context engineering, guardrails, human-in-the-loop, and observability built in. Async-first, fully typed, and easy to debug: a built-in LLM debugger pinpoints a failed run's first bad step, root cause, and fix.
 
-📖 **Documentation**: [English Version](https://xinhuangcs.github.io/agentbuilder/) · [中文版](https://xinhuangcs.github.io/agentbuilder/zh/)
+📖 **Documentation**: [English Version](https://xinhuangcs.github.io/agentmaker/) · [中文版](https://xinhuangcs.github.io/agentmaker/zh/)
 
 ## Highlights
 
@@ -26,8 +26,8 @@ A general-purpose Python framework for building LLM agents and multi-agent syste
 ## Installation
 
 ```bash
-pip install agentbuilder            # core batteries, works out of the box
-pip install "agentbuilder[all]"     # every optional extra below
+pip install agentmaker            # core batteries, works out of the box
+pip install "agentmaker[all]"     # every optional extra below
 ```
 
 Requires Python 3.12+. The core install already covers multi-provider LLM calls, structured output, tool-argument validation, and local hybrid retrieval (vectors plus CJK-aware keyword search). The optional extras below add the rest:
@@ -48,7 +48,7 @@ Requires Python 3.12+. The core install already covers multi-provider LLM calls,
 Define a tool, hand it to an agent, and the model calls it when it needs to:
 
 ```python
-from agentbuilder import Agent, LLMClient, tool
+from agentmaker import Agent, LLMClient, tool
 
 
 @tool
@@ -70,8 +70,8 @@ print(agent.run("What's the weather in Copenhagen?").final_output)
 Every capability is a few more arguments to the same constructor. Here is that agent given semantic long-term memory, a model-invoked skill library, retrieved context, and an input guardrail:
 
 ```python
-from agentbuilder import (Agent, LLMClient, Memory, MemoryStore, ContextBuilder, CallableSource, SkillLoader, CallableGuardrail)
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker import (Agent, LLMClient, Memory, MemoryStore, ContextBuilder, CallableSource, SkillLoader, CallableGuardrail)
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 llm = LLMClient("openai")
 memory = Memory(build_sqlite_hybrid(OpenAIEmbedder()), MemoryStore())
@@ -95,22 +95,22 @@ Every argument past `llm` is optional, so you add capabilities one at a time, an
 For development, attach the trace-based agent debugger. When a run fails, `DoctorHook` prints an LLM-written diagnosis (first bad step, root cause, suggested fix) straight to your terminal:
 
 ```python
-from agentbuilder import Agent, Tracer
-from agentbuilder.devtools import DoctorHook
+from agentmaker import Agent, Tracer
+from agentmaker.devtools import DoctorHook
 
 tracer = Tracer()
 agent = Agent("assistant", llm, tools=[get_weather], tracer=tracer, hooks=[DoctorHook(tracer)])
 print(agent.run("What's the weather in Copenhagen?").final_output)
 ```
 
-`DoctorHook` prints inline; for the full picture, `python -m agentbuilder.devtools` opens Trace Detective, a local web page that visualizes a recorded run step by step (its LLM calls, tool calls, and guardrails) and, on demand, has an LLM pinpoint the first bad step, root cause, and fix. Both are themselves agentbuilder agents, so the framework debugs its own runs. You debug agents with an agent.
+`DoctorHook` prints inline; for the full picture, `python -m agentmaker.devtools` opens Trace Detective, a local web page that visualizes a recorded run step by step (its LLM calls, tool calls, and guardrails) and, on demand, has an LLM pinpoint the first bad step, root cause, and fix. Both are themselves agentmaker agents, so the framework debugs its own runs. You debug agents with an agent.
 
 ## Learn more
 
-- [`examples/`](https://github.com/xinhuangcs/agentbuilder/tree/main/examples): sixteen runnable, numbered examples, from quickstart to skills.
-- [`CHANGELOG.md`](https://github.com/xinhuangcs/agentbuilder/blob/main/CHANGELOG.md)
-- Versioning: pre-1.0, minor versions may introduce breaking changes and patch versions only fix. Pin `agentbuilder>=0.1,<0.2`.
+- [`examples/`](https://github.com/xinhuangcs/agentmaker/tree/main/examples): sixteen runnable, numbered examples, from quickstart to skills.
+- [`CHANGELOG.md`](https://github.com/xinhuangcs/agentmaker/blob/main/CHANGELOG.md)
+- Versioning: pre-1.0, minor versions may introduce breaking changes and patch versions only fix. Pin `agentmaker>=0.1,<0.2`.
 
 ## License
 
-[MIT](https://github.com/xinhuangcs/agentbuilder/blob/main/LICENSE)
+[MIT](https://github.com/xinhuangcs/agentmaker/blob/main/LICENSE)

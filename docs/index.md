@@ -1,23 +1,23 @@
-# agentbuilder
+# agentmaker
 
 A general-purpose Python framework for building LLM agents and multi-agent systems, with tools, memory, retrieval / RAG, context engineering, guardrails, human-in-the-loop, and observability built in.
 
 ## Install
 
 ```bash
-pip install agentbuilder            # core batteries, works out of the box
-pip install "agentbuilder[all]"     # every optional capability
+pip install agentmaker            # core batteries, works out of the box
+pip install "agentmaker[all]"     # every optional capability
 ```
 
 Requires Python 3.12+. See [Installation](installation.md) for the full extras matrix.
 
 ## 30-second example
 
-Runs with zero setup (no API key, no network), exactly as shipped in [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/01_quickstart.py):
+Runs with zero setup (no API key, no network), exactly as shipped in [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/01_quickstart.py):
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -52,8 +52,8 @@ To use a real model, replace `ScriptedLLM(...)` with `LLMClient("deepseek")` (or
 
 ## Versioning
 
-Pre-1.0: minor versions may introduce breaking changes, patch versions only fix. Pin `agentbuilder>=0.1,<0.2`. See the [changelog](https://github.com/xinhuangcs/agentbuilder/blob/main/CHANGELOG.md).
+Pre-1.0: minor versions may introduce breaking changes, patch versions only fix. Pin `agentmaker>=0.1,<0.2`. See the [changelog](https://github.com/xinhuangcs/agentmaker/blob/main/CHANGELOG.md).
 
 ## License
 
-[MIT](https://github.com/xinhuangcs/agentbuilder/blob/main/LICENSE).
+[MIT](https://github.com/xinhuangcs/agentmaker/blob/main/LICENSE).

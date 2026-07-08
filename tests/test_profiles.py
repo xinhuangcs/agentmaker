@@ -7,8 +7,8 @@ carry the window/default model they should -- so a fat-fingered table edit is ca
 
 import pytest
 
-from agentbuilder.core.llm_clients import LLMClient, ModelInfo, _KNOWN_MODELS, _PROFILES
-from agentbuilder.core.adapters import _ADAPTERS, AnthropicAdapter, OpenAIAdapter, _StreamState
+from agentmaker.core.llm_clients import LLMClient, ModelInfo, _KNOWN_MODELS, _PROFILES
+from agentmaker.core.adapters import _ADAPTERS, AnthropicAdapter, OpenAIAdapter, _StreamState
 
 _VALID_STRUCTURED_OUTPUT = {"json_schema", "json_object", "none", "native"}
 # Profiles where the model is user-chosen and the context window is unknown (local / self-hosted / proxy / multi-model platforms)
@@ -22,7 +22,7 @@ def test_every_protocol_has_adapter():
 
 def test_register_adapter_extends_and_rejects_non_subclass():
     """register_adapter merges a third-party protocol->adapter into _ADAPTERS (must be a BaseAdapter subclass, else TypeError)."""
-    from agentbuilder.core.adapters import BaseAdapter, register_adapter
+    from agentmaker.core.adapters import BaseAdapter, register_adapter
     try:
         class _StubAdapter(BaseAdapter):
             def _ensure_client(self): ...
@@ -113,7 +113,7 @@ def test_explicit_supports_fc_wins():
 
 def test_known_model_overrides_supports_fc(monkeypatch):
     """A _KNOWN_MODELS model-level override beats the provider default (a temporary entry exercises the mechanism without pinning a real model)."""
-    from agentbuilder.core import llm_clients as M
+    from agentmaker.core import llm_clients as M
     monkeypatch.setitem(M._KNOWN_MODELS, "fake-no-fc-model",
                         ModelInfo(context_window=8000, supports_function_calling=False))
     assert LLMClient("deepseek", model="fake-no-fc-model").supports_function_calling is False
@@ -203,7 +203,7 @@ def _gemini_fc_response(sig):
 
 
 def _gemini_adapter():
-    from agentbuilder.core.adapters import GeminiAdapter
+    from agentmaker.core.adapters import GeminiAdapter
     return GeminiAdapter(model="gemini-x", api_key="x", base_url=None, timeout=1,
                          default_temperature=None, max_tokens_field="max_tokens", structured_output="native")
 
@@ -232,7 +232,7 @@ def test_gemini_thought_signature_roundtrip_decodes_to_bytes():
 
 def test_request_error_maps_genai_code():
     """genai's errors.APIError exposes .code (int), not .status_code; _request_error should fall back to .code and derive retryable from it."""
-    from agentbuilder.core.adapters.base import _request_error
+    from agentmaker.core.adapters.base import _request_error
 
     class _GenaiErr(Exception):                        # mimics genai APIError: has .code / .status, no .status_code
         def __init__(self, code, status):
@@ -249,7 +249,7 @@ def test_request_error_maps_genai_code():
 
 def test_request_error_ignores_non_int_code():
     """openai's .code is a string error code (e.g. invalid_api_key), not an HTTP code, so it must not be used as a status code."""
-    from agentbuilder.core.adapters.base import _request_error
+    from agentmaker.core.adapters.base import _request_error
 
     class _OpenAIStrCode(Exception):
         code = "invalid_api_key"                        # string, not int
@@ -261,7 +261,7 @@ def test_request_error_ignores_non_int_code():
 
 def test_gemini_http_options_kwargs_pure():
     """_http_options_kwargs: timeout seconds->milliseconds, base_url passed through, None entries omitted (pure function, no SDK needed)."""
-    from agentbuilder.core.adapters import GeminiAdapter
+    from agentmaker.core.adapters import GeminiAdapter
     assert GeminiAdapter._http_options_kwargs(5, "http://proxy/v1") == {"timeout": 5000, "base_url": "http://proxy/v1"}
     assert GeminiAdapter._http_options_kwargs(2.5, None) == {"timeout": 2500}
     assert GeminiAdapter._http_options_kwargs(None, None) == {}
@@ -271,7 +271,7 @@ def test_gemini_client_applies_http_options(monkeypatch):
     """Constructing genai.Client actually applies timeout (->ms) / base_url via HttpOptions. Requires google-genai, else skipped."""
     import asyncio
     genai = pytest.importorskip("google.genai")
-    from agentbuilder.core.adapters import GeminiAdapter
+    from agentmaker.core.adapters import GeminiAdapter
 
     captured: dict = {}
     monkeypatch.setattr(genai, "Client", lambda **kw: captured.update(kw) or object())
@@ -319,7 +319,7 @@ def test_openai_provider_defaults_to_official_base_url(_no_generic_base_url):
 
 def test_openai_compatible_without_base_url_fails_loud(_no_generic_base_url):
     """A generic openai_compatible profile missing base_url fails loud, never silently sending to OpenAI's official endpoint (the key would leak to the wrong host)."""
-    from agentbuilder.core.exceptions import LLMConfigError
+    from agentmaker.core.exceptions import LLMConfigError
     with pytest.raises(LLMConfigError):
         LLMClient("openai_compatible", api_key="x", model="m")
 
@@ -328,7 +328,7 @@ def test_openai_adapter_error_tagged_with_real_provider():
     """The OpenAI-compatible protocol fronts many vendors; a failed call is tagged with the real provider (deepseek), not a generic openai."""
     import asyncio
     from types import SimpleNamespace
-    from agentbuilder.core.exceptions import LLMRequestError
+    from agentmaker.core.exceptions import LLMRequestError
 
     ad = OpenAIAdapter(model="deepseek-v4", api_key="x", base_url="http://x/v1", timeout=1,
                        default_temperature=None, max_tokens_field="max_tokens",
@@ -345,7 +345,7 @@ def test_openai_adapter_error_tagged_with_real_provider():
 
 def test_close_objects_preserves_user_field_named_properties():
     """_close_objects recursion: a user field literally named properties (not the properties container) must not be mistaken for a container and mutated."""
-    from agentbuilder.core.adapters.anthropic import _close_objects
+    from agentmaker.core.adapters.anthropic import _close_objects
     schema = {"type": "object", "properties": {
         "config": {"type": "object", "properties": {
             "properties": {"type": "string"}}}}}              # user field happens to be named properties; its value is a plain string sub-schema
@@ -449,8 +449,8 @@ def test_gemini_stream_closed_on_early_break():
 def test_gemini_finish_reason_normalized_lowercase():
     """Gemini's FinishReason enum str()s to 'FinishReason.MAX_TOKENS', which won't match other vendors; _finish_reason
     lowercases the member name to 'max_tokens' so the harness's truncation set recognizes it (else Gemini length-truncation is silently treated as complete)."""
-    from agentbuilder.core.adapters.gemini import _finish_reason
-    from agentbuilder.runtime.harness import _TRUNCATION_REASONS
+    from agentmaker.core.adapters.gemini import _finish_reason
+    from agentmaker.runtime.harness import _TRUNCATION_REASONS
     assert _finish_reason(None) is None
     assert _finish_reason("STOP") == "stop"                       # non-enum (string) input falls back to lowercase
     fake_enum = type("FR", (), {"name": "MAX_TOKENS"})()          # mimics the FinishReason enum (has .name)

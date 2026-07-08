@@ -5,7 +5,7 @@
 Reach for `LLMClient` directly when you want raw model access. When you build an [Agent](agents.md), you usually hand it an `LLMClient` (or let `AgentSpec` construct one from a `"provider:model"` string) and never call `chat()` yourself.
 
 ```python
-from agentbuilder import LLMClient
+from agentmaker import LLMClient
 
 llm = LLMClient("deepseek")                       # provider's default model (deepseek-v4-flash)
 resp = await llm.chat([{"role": "user", "content": "Hello"}])
@@ -13,7 +13,7 @@ print(resp.content)
 ```
 
 !!! note
-    `chat()` and `stream()` are coroutines: the framework is async to the core. Run them inside an event loop with `await`, or from synchronous code through the facade in `agentbuilder.core.aio` (`run_sync(llm.chat(...))` / `iter_sync(llm.stream(...))`).
+    `chat()` and `stream()` are coroutines: the framework is async to the core. Run them inside an event loop with `await`, or from synchronous code through the facade in `agentmaker.core.aio` (`run_sync(llm.chat(...))` / `iter_sync(llm.stream(...))`).
 
 ## Selecting a provider and model
 
@@ -120,8 +120,8 @@ Both `temperature` and `max_tokens` are optional. By default the client sends no
 ```python
 import asyncio
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 async def main():
@@ -202,8 +202,8 @@ For most work you do not call this directly. The [Agent](agents.md) layer accept
 ```python
 from pydantic import BaseModel
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 class Person(BaseModel):
@@ -223,7 +223,7 @@ print(f"{type(person).__name__}(name={person.name!r}, age={person.age})")
 A message's `content` is either a plain string (the common case) or a list of provider-neutral content parts. The `Message` dataclass models one message with a `role`, `content`, a `timestamp`, and a `metadata` dict; call `to_dict()` to get the `{"role", "content"}` shape that `chat()` and `stream()` consume.
 
 ```python
-from agentbuilder import Message
+from agentmaker import Message
 
 msg = Message(content="Hello", role="user")
 await llm.chat([msg.to_dict()])
@@ -237,7 +237,7 @@ To send text and images in one message, build the content list with the part hel
 - `image_part_from_url(url)` references a remote image the provider fetches.
 
 ```python
-from agentbuilder import LLMClient, text_part, image_part_from_file
+from agentmaker import LLMClient, text_part, image_part_from_file
 
 llm = LLMClient("openai")
 messages = [{
@@ -261,7 +261,7 @@ Each provider profile carries a `supports_vision` flag. When it is known to be `
 You do not have to edit the framework to add a vendor. Pass a `ProviderProfile` to reuse an existing protocol without touching the source:
 
 ```python
-from agentbuilder import LLMClient, ProviderProfile
+from agentmaker import LLMClient, ProviderProfile
 
 llm = LLMClient(
     provider="myvendor",
@@ -273,7 +273,7 @@ llm = LLMClient(
 For an entirely new wire protocol, register an adapter class (a `BaseAdapter` subclass) under a protocol name, then reference that name from a profile:
 
 ```python
-from agentbuilder.core.adapters import register_adapter
+from agentmaker.core.adapters import register_adapter
 
 register_adapter("myproto", MyAdapter)   # MyAdapter is your BaseAdapter subclass
 LLMClient("myvendor", profile=ProviderProfile(protocol="myproto", default_model="m", key_envs=("MYVENDOR_API_KEY",)))

@@ -1,15 +1,15 @@
 # Memory
 
-Memory gives an agent durable facts that survive across conversations: what the user is allergic to, where they live, how they like their coffee. agentbuilder ships two complementary memory types. `Memory` is semantic memory, where you write free-form facts and recall them by meaning. `KVMemory` is key-value memory, where you write structured facts under an exact key and read them back verbatim. Reach for `Memory` when a fact is fuzzy and you want the most relevant ones back ("what food should I avoid"); reach for `KVMemory` when a fact is definite and single-valued (`location = Beijing`).
+Memory gives an agent durable facts that survive across conversations: what the user is allergic to, where they live, how they like their coffee. agentmaker ships two complementary memory types. `Memory` is semantic memory, where you write free-form facts and recall them by meaning. `KVMemory` is key-value memory, where you write structured facts under an exact key and read them back verbatim. Reach for `Memory` when a fact is fuzzy and you want the most relevant ones back ("what food should I avoid"); reach for `KVMemory` when a fact is definite and single-valued (`location = Beijing`).
 
 ## Quickstart
 
-`Memory` pairs a source-of-truth store (`MemoryStore`) with a retrieval index built by [Retrieval & RAG](retrieval-and-rag.md). An embedder turns text into a vector so that similar meanings sit close together; the snippet below uses `FakeEmbedder`, a deterministic offline stand-in, so it runs with no API key and no network. This is [`examples/04_memory.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/04_memory.py) verbatim:
+`Memory` pairs a source-of-truth store (`MemoryStore`) with a retrieval index built by [Retrieval & RAG](retrieval-and-rag.md). An embedder turns text into a vector so that similar meanings sit close together; the snippet below uses `FakeEmbedder`, a deterministic offline stand-in, so it runs with no API key and no network. This is [`examples/04_memory.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/04_memory.py) verbatim:
 
 ```python
-from agentbuilder import Memory, MemoryStore
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(FakeEmbedder()), store=MemoryStore())
 
@@ -44,9 +44,9 @@ for hit in memory.search("what food should I avoid", top_k=2):
 The three weights, the half-life, and the default result count all live in `MemoryConfig` and default to a sensible baseline (all weights `1.0`, `recency_halflife_hours=72.0`, `search_top_k=5`). Pass a config at construction to retune globally, or override per call as keyword arguments to `search`:
 
 ```python
-from agentbuilder import Memory, MemoryStore, MemoryConfig
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore, MemoryConfig
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 memory = Memory(
     retriever=build_sqlite_hybrid(FakeEmbedder()),
@@ -100,8 +100,8 @@ Calling `add` for every incoming message quickly fills memory with duplicates an
 
 ```python
 import asyncio
-from agentbuilder import Memory, MemoryStore, SmartWriter, LLMClient
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker import Memory, MemoryStore, SmartWriter, LLMClient
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(OpenAIEmbedder()), store=MemoryStore())
 writer = SmartWriter(memory, LLMClient("deepseek"))
@@ -143,7 +143,7 @@ result = await memory.consolidate()   # {"before": 12, "after": 8}
 For definite, single-valued facts, semantic recall is overkill and imprecise. `KVMemory` stores one value per key and reads it back exactly, with no guessing. `KVStore` is the underlying SQLite table (string values); `KVMemory` is a facade over it that JSON-encodes and decodes, so values can be strings, numbers, lists, or dicts. It carries a fixed [scope](retrieval-and-rag.md) for ownership:
 
 ```python
-from agentbuilder import KVStore, KVMemory, Scope
+from agentmaker import KVStore, KVMemory, Scope
 
 kv = KVMemory(KVStore(), scope=Scope(base="kv", user="alice"))
 
@@ -162,8 +162,8 @@ print(kv.as_dict())              # {"location": "Beijing", "allergies": ["peanut
 `MemoryTool` wraps a `Memory` (optionally with a `SmartWriter`) as a [tool](tools.md), so the agent can decide on its own to remember and recall mid-conversation. Register it like any other tool:
 
 ```python
-from agentbuilder import Agent, Memory, MemoryStore, MemoryTool, LLMClient
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker import Agent, Memory, MemoryStore, MemoryTool, LLMClient
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(OpenAIEmbedder()), store=MemoryStore())
 agent = Agent("assistant", LLMClient("deepseek"), tools=[MemoryTool(memory)])
@@ -189,7 +189,7 @@ memory = Memory(
 For multi-user isolation, give each user its own scope. Pass `scope=` at construction so every write and read stays within that owner's data, and keep one `Memory` (and one `SmartWriter`) per user:
 
 ```python
-from agentbuilder import Scope
+from agentmaker import Scope
 
 alice = Scope(base="memory", user="alice")
 memory = Memory(retriever=..., store=..., scope=alice)

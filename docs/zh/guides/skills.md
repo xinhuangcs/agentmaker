@@ -6,13 +6,13 @@
 
 ## 快速上手
 
-下面是 [`examples/16_skills.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/16_skills.py) 的原样内容。它是自洽的（写入一个临时目录，无需 API key、无需联网）：
+下面是 [`examples/16_skills.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/16_skills.py) 的原样内容。它是自洽的（写入一个临时目录，无需 API key、无需联网）：
 
 ```python
 import tempfile
 from pathlib import Path
 
-from agentbuilder import SkillLoader
+from agentmaker import SkillLoader
 
 # Create a couple of skills on disk; each is a folder containing a SKILL.md.
 root = Path(tempfile.mkdtemp())

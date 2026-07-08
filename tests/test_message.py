@@ -4,7 +4,7 @@ from datetime import timezone
 
 import pytest
 
-from agentbuilder.core import Message
+from agentmaker.core import Message
 
 
 def test_valid_roles_accepted():

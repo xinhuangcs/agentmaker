@@ -1,13 +1,13 @@
 # Scope & async
 
-Two framework-wide capabilities that shape how you run agentbuilder in production. **Scope** is a label attached to every read and write that isolates retrieval, memory, and conversation sessions across users, agents, and apps that all share one backend. **Async-first** means agentbuilder is asynchronous to the core: the coroutine is the real implementation of each capability, every outward capability has an `a*` counterpart, streaming is an `async for`, and the plain synchronous methods are thin facades over the async body. You will reach for Scope the moment more than one user (or more than one agent) shares a store, and for the async API whenever you run inside a web server or any other event loop.
+Two framework-wide capabilities that shape how you run agentmaker in production. **Scope** is a label attached to every read and write that isolates retrieval, memory, and conversation sessions across users, agents, and apps that all share one backend. **Async-first** means agentmaker is asynchronous to the core: the coroutine is the real implementation of each capability, every outward capability has an `a*` counterpart, streaming is an `async for`, and the plain synchronous methods are thin facades over the async body. You will reach for Scope the moment more than one user (or more than one agent) shares a store, and for the async API whenever you run inside a web server or any other event loop.
 
 ## Scope
 
 A `Scope` is an ownership label with five optional dimensions. Every store and index column carries these dimensions, so a read or write tagged with a Scope only ever touches rows that match it. `Scope` is imported straight from the top level:
 
 ```python
-from agentbuilder import Scope
+from agentmaker import Scope
 ```
 
 It is a frozen (immutable, hashable) dataclass. Every field is optional and defaults to `None`:
@@ -22,12 +22,12 @@ It is a frozen (immutable, hashable) dataclass. Every field is optional and defa
 
 ### Isolate memory and retrieval
 
-This is the whole point of Scope: many tenants can share one backend and one index, yet each retrieves only its own data. The following runs with no API key and no network, exactly as shipped in [`examples/10_scope_isolation.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/10_scope_isolation.py):
+This is the whole point of Scope: many tenants can share one backend and one index, yet each retrieves only its own data. The following runs with no API key and no network, exactly as shipped in [`examples/10_scope_isolation.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/10_scope_isolation.py):
 
 ```python
-from agentbuilder import Memory, MemoryStore, Scope
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore, Scope
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 # One shared store + index; the only thing separating the two users is their Scope.
 store = MemoryStore()
@@ -51,15 +51,15 @@ Scope filters on non-empty dimensions only. A read adds a constraint for each di
 `base` distinguishes subsystems such as memory and RAG (retrieval-augmented generation, feeding retrieved documents into the prompt). By convention each upper layer passes it explicitly, which is why the example above uses `Scope(base="memory", user="alice")`: `Memory` works under `base="memory"` so its data never collides with a RAG store sharing the same file.
 
 !!! note "The all-scopes guardrail"
-    A fully empty `Scope()` restricts nothing, so it would match the entire database. For destructive or global operations the retrieval layer refuses a bare `Scope()` unless the caller explicitly opts in. If you build a custom retrieval backend, the helpers `scope_is_empty` and `require_explicit_scope` (both importable from `agentbuilder.retrieval`) implement this check: `require_explicit_scope(scope, all_scopes, action)` raises unless `all_scopes=True` is passed for a scope that restricts no dimension. The framework's built-in memory and RAG always carry a non-empty `base`, so they are never blocked.
+    A fully empty `Scope()` restricts nothing, so it would match the entire database. For destructive or global operations the retrieval layer refuses a bare `Scope()` unless the caller explicitly opts in. If you build a custom retrieval backend, the helpers `scope_is_empty` and `require_explicit_scope` (both importable from `agentmaker.retrieval`) implement this check: `require_explicit_scope(scope, all_scopes, action)` raises unless `all_scopes=True` is passed for a scope that restricts no dimension. The framework's built-in memory and RAG always carry a non-empty `base`, so they are never blocked.
 
 ### Scope in agents (sessions)
 
 The same label isolates conversation history. An `Agent` takes a default `scope=` at construction, and `run` / `arun` / `resume` / `stream_run` each accept a per-call `scope=` that overrides it. History is loaded and saved by scope, so a single `Agent` instance can serve many independent sessions:
 
 ```python
-from agentbuilder import Agent, Scope
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, Scope
+from agentmaker.testing import ScriptedLLM
 
 agent = Agent("assistant", ScriptedLLM(["Hi Alice.", "Hi Bob."]), scope=Scope(user="alice"))
 
@@ -75,13 +75,13 @@ Every outward capability exposes an `a*` twin of its synchronous method: agents 
 
 ### Run an agent asynchronously
 
-This runs with no API key and no network, exactly as shipped in [`examples/09_async.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/09_async.py):
+This runs with no API key and no network, exactly as shipped in [`examples/09_async.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/09_async.py):
 
 ```python
 import asyncio
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 async def main():

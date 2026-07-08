@@ -2,11 +2,11 @@
 
 工具（tool）就是你的 Agent 能调用的函数。一个工具对外暴露名称、描述和带类型的参数列表；模型通过 **function calling**（函数调用，即模型输出一个结构化请求，要求以给定参数运行某个具名工具的机制）来调用它，框架随后运行该工具并把结果回传给模型。本指南涵盖：定义工具（一行式的 `@tool` 装饰器或 `Tool` 子类）、用 `ToolResponse` 返回结果、用 `ToolRegistry` 归集工具、内置工具、权限与确认关卡、接入外部 MCP 服务器，以及用 Tool-RAG 在运行时从大量工具中动态挑选。
 
-本页所有内容都运行在 [Agent](agents.md) 循环之上。完整可运行示例见 [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/02_tools_and_registry.py)：
+本页所有内容都运行在 [Agent](agents.md) 循环之上。完整可运行示例见 [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/02_tools_and_registry.py)：
 
 ```python
-from agentbuilder import Agent, CalculatorTool, ToolRegistry, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, CalculatorTool, ToolRegistry, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -46,7 +46,7 @@ print(agent.run("Compute (3 + 4) * 5").final_output)
 
 ```python
 from typing import Annotated
-from agentbuilder import tool
+from agentmaker import tool
 
 
 @tool
@@ -85,7 +85,7 @@ def delete_file(path: str) -> str:
 当你需要保存状态、自定义 schema，或表达装饰器无法表达的逻辑时，直接继承 `Tool`。实现 `get_parameters()`（返回一个 `ToolParameter` 列表）和 `run()`（返回一个 `ToolResponse`）：
 
 ```python
-from agentbuilder import Tool, ToolParameter, ToolResponse
+from agentmaker import Tool, ToolParameter, ToolResponse
 
 
 class ReverseTool(Tool):
@@ -147,7 +147,7 @@ ToolResponse.error("query must not be empty")  # status="error"
 `ToolRegistry` 按名称保存一个 Agent 可调用的工具。可以用 `register` 逐个注册，也可以用 `register_all` 批量注册：
 
 ```python
-from agentbuilder import ToolRegistry, CalculatorTool, SearchTool
+from agentmaker import ToolRegistry, CalculatorTool, SearchTool
 
 registry = ToolRegistry()
 registry.register(CalculatorTool())
@@ -192,7 +192,7 @@ agent = Agent("assistant", llm, tool_registry=registry)               # explicit
 安全地求解数学表达式：把表达式解析成抽象语法树（AST），只对白名单内的运算符求值，因此没有 `eval`、也不存在任意代码执行。它支持 `+ - * / // % **`、一元正负号，以及函数 `sqrt`、`abs`、`round`、`log`、`sin`、`cos` 和常量 `pi`、`e`。它只有一个参数 `expression`，构造时无需任何参数（与所有内置工具一样，它接受一个可选的 `prompts=`，用于本地化其面向用户的字符串）：
 
 ```python
-from agentbuilder import CalculatorTool
+from agentmaker import CalculatorTool
 
 registry.register(CalculatorTool())   # tool name: "calculator"
 ```
@@ -202,7 +202,7 @@ registry.register(CalculatorTool())   # tool name: "calculator"
 带自动多源回退的网页搜索：它先试 Tavily，再试 DuckDuckGo，然后 Brave，最后 SerpAPI；只要某个源没装对应库、没配置 key 或调用失败，就切到下一个源。只有全部失败时才返回错误。key 从环境变量读取（`TAVILY_API_KEY`、`BRAVE_API_KEY`、`SERPAPI_API_KEY`）；DuckDuckGo 不需要 key。它只有一个参数 `query`。
 
 ```python
-from agentbuilder import SearchTool
+from agentmaker import SearchTool
 
 registry.register(SearchTool(max_results=5))   # tool name: "search"
 ```
@@ -214,7 +214,7 @@ registry.register(SearchTool(max_results=5))   # tool name: "search"
 把「运行一条白名单内的本地命令」封装成一个工具。由于命令行本身高风险，安全是其核心设计：它默认拒绝（deny-by-default，只有你列出的程序才被允许），从不使用 `shell=True`（参数用 `shlex` 分词，未加引号的 shell 运算符会被拒绝），针对高风险标志施加一道危险参数关卡，只传入一个最小环境（`PATH`、`HOME`、`LANG`），使得 `.env` 里的密钥绝不会通过命令输出泄漏回来，并强制超时加输出截断。它被标记为 `requires_confirmation = True`。它的工具名是 `shell`，只有一个参数 `command`。
 
 ```python
-from agentbuilder import CLITool
+from agentmaker import CLITool
 
 registry.register(CLITool(allowed_commands=["git", "ls", "grep"], timeout=10.0, max_output_chars=4000))
 ```
@@ -226,7 +226,7 @@ registry.register(CLITool(allowed_commands=["git", "ls", "grep"], timeout=10.0, 
 让 Agent 在一个受限目录内读取和追加笔记文件，从而跨会话保留进度、计划和决策。所有读写都被限制在你构造时给定的 `root` 之内：任何在路径解析后逃逸出去的路径（`..`、绝对路径，或经由符号链接逃逸）都会被拒绝。它的工具名是 `notes`，参数为 `action`（`read` 或 `append`）、`path`（相对于 `root`）和 `content`（用于 `append`）。
 
 ```python
-from agentbuilder import NotesTool
+from agentmaker import NotesTool
 
 registry.register(NotesTool(root="./agent_notes"))
 ```
@@ -238,7 +238,7 @@ registry.register(NotesTool(root="./agent_notes"))
 被标记 `requires_confirmation` 的工具（以及像 `NotesTool` 那样按动作各自决定的工具）必须先通过一个确认回调才能运行。该回调的签名是 `(tool, parameters) -> bool`；只有返回 `True` 时工具才会运行。把它作为 `confirm` 传给 Agent：
 
 ```python
-from agentbuilder import Agent, cli_confirm
+from agentmaker import Agent, cli_confirm
 
 agent = Agent("assistant", llm, tools=[CLITool(allowed_commands=["ls"])], confirm=cli_confirm)
 ```
@@ -258,7 +258,7 @@ agent = Agent("assistant", llm, tools=[CLITool(allowed_commands=["ls"])], confir
 `allow=None` 表示该维度不启用允许列表（「不设限制」）；`allow=[]` 表示一个空的允许列表，拒绝一切。把一个 `ToolPermissions` 作为 `permissions` 传给 Agent：
 
 ```python
-from agentbuilder import Agent, ToolPermissions
+from agentmaker import Agent, ToolPermissions
 
 permissions = ToolPermissions(allow_origins={"builtin"}, deny={"shell"})
 agent = Agent("assistant", llm, tool_registry=registry, permissions=permissions)
@@ -268,12 +268,12 @@ agent = Agent("assistant", llm, tool_registry=registry, permissions=permissions)
 
 ## MCP 集成
 
-MCP（Model Context Protocol，模型上下文协议，Anthropic 提出的、用于向模型暴露工具的开放标准，有时被称为「AI 的 USB-C」）让你可以连接一个发布了一组工具的服务器，并把其中每个工具适配成一个 agentbuilder 的 `Tool`。`MCPClient` 负责管理连接并列出工具；每个工具会变成一个 `MCPTool`，像其他工具一样注册。`mcp` 是一个可选依赖（`uv add mcp`），惰性导入。
+MCP（Model Context Protocol，模型上下文协议，Anthropic 提出的、用于向模型暴露工具的开放标准，有时被称为「AI 的 USB-C」）让你可以连接一个发布了一组工具的服务器，并把其中每个工具适配成一个 agentmaker 的 `Tool`。`MCPClient` 负责管理连接并列出工具；每个工具会变成一个 `MCPTool`，像其他工具一样注册。`mcp` 是一个可选依赖（`uv add mcp`），惰性导入。
 
 支持两种传输方式。用 `async with` 管理连接生命周期，并在该代码块存活期间调用这些工具：
 
 ```python
-from agentbuilder import MCPClient, ToolRegistry
+from agentmaker import MCPClient, ToolRegistry
 
 registry = ToolRegistry()
 
@@ -305,7 +305,7 @@ async with MCPClient(url="https://mcp.example.com/mcp", namespace="calendar", au
 一旦一个 Agent 有很多工具，把每个工具的完整 schema 都塞进 prompt 既昂贵又会拉低准确率。Tool-RAG（RAG 即 retrieval-augmented generation，检索增强生成，只检索相关条目而不是把一切都发过去）只为当前输入检索出最相关的工具，并只展开那一个子集。`ToolRetriever` 把每个工具的名称、描述和参数名索引进一个共享的检索器，并返回最匹配的若干项：
 
 ```python
-from agentbuilder import ToolRetriever
+from agentmaker import ToolRetriever
 
 # `retriever` is a HybridRetriever; see the Retrieval & RAG guide for how to build one.
 tool_retriever = ToolRetriever(registry, retriever, top_k=8, always_include=("tool_search",))
@@ -330,7 +330,7 @@ agent = Agent("assistant", llm, tool_registry=registry, tool_retriever=tool_retr
 一次性预选有个盲区：在多步任务里，第二步需要哪个工具，可能取决于第一步的输出。`ToolSearchTool` 补上了这个缺口，它把工具检索本身做成一个模型可以在运行途中调用的工具。它返回一份匹配工具的目录外加一个 `discovered` 列表，循环会把这些工具并入本次运行剩余部分的可用工具集：
 
 ```python
-from agentbuilder import ToolSearchTool
+from agentmaker import ToolSearchTool
 
 registry.register(ToolSearchTool(tool_retriever, top_k=5))   # tool name: "tool_search"
 ```

@@ -1,6 +1,6 @@
 # 快速上手
 
-本指南用十几行代码构建一个可运行的 Agent（智能体，能自主调用工具完成任务的程序）：把一个函数变成工具（tool），用一个脚本化的测试模型顶替真实的 LLM（大语言模型），因此无需 API key、无需联网即可运行，随后 Agent 以「模型在一个循环里调用工具」的方式跑完一轮，交回最终答案。如果你刚接触 agentbuilder，请先读这一篇；其余每篇指南都默认你脑中已有这个基本形态。本文逐行讲解 [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/01_quickstart.py)，再演示如何把测试模型换成真实的服务商。
+本指南用十几行代码构建一个可运行的 Agent（智能体，能自主调用工具完成任务的程序）：把一个函数变成工具（tool），用一个脚本化的测试模型顶替真实的 LLM（大语言模型），因此无需 API key、无需联网即可运行，随后 Agent 以「模型在一个循环里调用工具」的方式跑完一轮，交回最终答案。如果你刚接触 agentmaker，请先读这一篇；其余每篇指南都默认你脑中已有这个基本形态。本文逐行讲解 [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/01_quickstart.py)，再演示如何把测试模型换成真实的服务商。
 
 ## 完整程序
 
@@ -11,8 +11,8 @@ uv run python examples/01_quickstart.py
 ```
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -77,7 +77,7 @@ llm = ScriptedLLM([
 ])
 ```
 
-`ScriptedLLM` 是一个测试替身（test double）：它按调用顺序吐出预设好的响应，而不去联系真实服务商，因此 Agent 测试既不产生费用也不需要联网。它位于 `agentbuilder.testing`，不属于顶层公开接口，所以要显式导入 `from agentbuilder.testing import ScriptedLLM`。
+`ScriptedLLM` 是一个测试替身（test double）：它按调用顺序吐出预设好的响应，而不去联系真实服务商，因此 Agent 测试既不产生费用也不需要联网。它位于 `agentmaker.testing`，不属于顶层公开接口，所以要显式导入 `from agentmaker.testing import ScriptedLLM`。
 
 脚本列表中的每一项，要么是：
 
@@ -142,7 +142,7 @@ print(result.usage.tool_calls)             # 1 (get_weather ran once)
 唯一要改的只有 LLM 这一行。把 `ScriptedLLM(...)` 换成 `LLMClient`，现在就由模型自己决定何时调用 `get_weather`：
 
 ```python
-from agentbuilder import Agent, LLMClient, tool
+from agentmaker import Agent, LLMClient, tool
 
 
 @tool
@@ -179,9 +179,9 @@ print(result.final_output)
 上面这个 agent 是刻意做到最小的。其余每一样能力，都只是往同一个构造函数里多传几个参数，每个都可选。下面就是给那个 agent 挂上语义长期记忆、一套模型自选的技能库、检索到的上下文，以及一道输入护栏：
 
 ```python
-from agentbuilder import (Agent, LLMClient, Memory, MemoryStore, ContextBuilder,
+from agentmaker import (Agent, LLMClient, Memory, MemoryStore, ContextBuilder,
                           CallableSource, SkillLoader, CallableGuardrail)
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 llm = LLMClient("openai")
 memory = Memory(build_sqlite_hybrid(OpenAIEmbedder()), MemoryStore())
@@ -211,15 +211,15 @@ print(agent.run("Plan a day in Copenhagen, and remember I'm vegetarian.").final_
 开发时，给它挂上基于 trace 的 agent 调试器。`Tracer` 记录一次运行的每一步，`DoctorHook` 会把一次失败的运行变成由 LLM 撰写的诊断（最早出错的步骤、根因、修复建议），直接打到你的终端：
 
 ```python
-from agentbuilder import Agent, Tracer
-from agentbuilder.devtools import DoctorHook
+from agentmaker import Agent, Tracer
+from agentmaker.devtools import DoctorHook
 
 tracer = Tracer()
 agent = Agent("assistant", llm, tools=[get_weather], tracer=tracer, hooks=[DoctorHook(tracer)])
 print(agent.run("What's the weather in Copenhagen?").final_output)
 ```
 
-`DoctorHook` 以及独立的 Trace 侦探（`python -m agentbuilder.devtools`，一个架在录制运行之上的本地网页）本身就是 agentbuilder 的 agent，所以框架会诊断它自己的运行。tracing、导出器（exporter）与 Trace 侦探界面详见 [可观测性](observability.md)。
+`DoctorHook` 以及独立的 Trace 侦探（`python -m agentmaker.devtools`，一个架在录制运行之上的本地网页）本身就是 agentmaker 的 agent，所以框架会诊断它自己的运行。tracing、导出器（exporter）与 Trace 侦探界面详见 [可观测性](observability.md)。
 
 ## 下一步去哪里
 

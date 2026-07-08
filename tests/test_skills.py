@@ -5,7 +5,7 @@ Covers frontmatter parsing edge cases (normal / none / unclosed / a key:value in
 
 import pytest
 
-from agentbuilder.skills.loader import SkillLoader, _parse_frontmatter, _parse_meta
+from agentmaker.skills.loader import SkillLoader, _parse_frontmatter, _parse_meta
 
 
 # ---------- frontmatter parsing ----------

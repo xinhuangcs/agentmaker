@@ -11,7 +11,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agentbuilder"
+name = "agentmaker"
 source = { editable = "." }
 dependencies = [
     { name = "jieba" },

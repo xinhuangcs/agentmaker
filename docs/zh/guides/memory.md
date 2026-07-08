@@ -1,15 +1,15 @@
 # 记忆（Memory）
 
-记忆（memory）让 agent 拥有可跨会话长期保留的事实：用户对什么过敏、住在哪里、喜欢怎样的咖啡。agentbuilder 内置两种互补的记忆类型。`Memory` 是语义记忆（semantic memory），你写入自由形式的事实，再按语义把它们召回。`KVMemory` 是键值记忆（key-value memory），你把结构化的事实写在一个确切的键（key）下，之后原样读回。当一个事实比较模糊、你希望取回最相关的若干条时（比如「我该避开什么食物」），用 `Memory`；当一个事实是确定且单值的（`location = Beijing`）时，用 `KVMemory`。
+记忆（memory）让 agent 拥有可跨会话长期保留的事实：用户对什么过敏、住在哪里、喜欢怎样的咖啡。agentmaker 内置两种互补的记忆类型。`Memory` 是语义记忆（semantic memory），你写入自由形式的事实，再按语义把它们召回。`KVMemory` 是键值记忆（key-value memory），你把结构化的事实写在一个确切的键（key）下，之后原样读回。当一个事实比较模糊、你希望取回最相关的若干条时（比如「我该避开什么食物」），用 `Memory`；当一个事实是确定且单值的（`location = Beijing`）时，用 `KVMemory`。
 
 ## 快速上手
 
-`Memory` 把一个作为唯一事实来源的存储（`MemoryStore`）与一个由 [检索与 RAG](retrieval-and-rag.md) 构建的检索索引配对起来。嵌入器（embedder）把文本转成向量，让意思相近的内容在向量空间里彼此靠近；下面的代码片段用的是 `FakeEmbedder`，它是一个确定性的离线替身，因此无需 API key、无需联网即可运行。以下内容与 [`examples/04_memory.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/04_memory.py) 完全一致：
+`Memory` 把一个作为唯一事实来源的存储（`MemoryStore`）与一个由 [检索与 RAG](retrieval-and-rag.md) 构建的检索索引配对起来。嵌入器（embedder）把文本转成向量，让意思相近的内容在向量空间里彼此靠近；下面的代码片段用的是 `FakeEmbedder`，它是一个确定性的离线替身，因此无需 API key、无需联网即可运行。以下内容与 [`examples/04_memory.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/04_memory.py) 完全一致：
 
 ```python
-from agentbuilder import Memory, MemoryStore
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(FakeEmbedder()), store=MemoryStore())
 
@@ -44,9 +44,9 @@ for hit in memory.search("what food should I avoid", top_k=2):
 这三个权重、半衰期，以及默认返回条数都放在 `MemoryConfig` 里，并有一组合理的基线默认值（所有权重均为 `1.0`，`recency_halflife_hours=72.0`，`search_top_k=5`）。在构造时传入一个 config 可做全局调优，或者在每次调用时以关键字参数的形式传给 `search` 做单次覆盖：
 
 ```python
-from agentbuilder import Memory, MemoryStore, MemoryConfig
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore, MemoryConfig
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 memory = Memory(
     retriever=build_sqlite_hybrid(FakeEmbedder()),
@@ -100,8 +100,8 @@ memory.add("Ships to production on Fridays", type="procedural", importance=0.9,
 
 ```python
 import asyncio
-from agentbuilder import Memory, MemoryStore, SmartWriter, LLMClient
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker import Memory, MemoryStore, SmartWriter, LLMClient
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(OpenAIEmbedder()), store=MemoryStore())
 writer = SmartWriter(memory, LLMClient("deepseek"))
@@ -143,7 +143,7 @@ result = await memory.consolidate()   # {"before": 12, "after": 8}
 对于确定且单值的事实，用语义召回既大材小用又不够精确。`KVMemory` 每个键只存一个值，并原样读回，不做任何猜测。`KVStore` 是底层的 SQLite 表（值为字符串）；`KVMemory` 是它之上的一层门面（facade），负责 JSON 编码和解码，因此值可以是字符串、数字、列表或字典。它带有一个固定的 [scope](retrieval-and-rag.md)（作用域）用于归属：
 
 ```python
-from agentbuilder import KVStore, KVMemory, Scope
+from agentmaker import KVStore, KVMemory, Scope
 
 kv = KVMemory(KVStore(), scope=Scope(base="kv", user="alice"))
 
@@ -162,8 +162,8 @@ print(kv.as_dict())              # {"location": "Beijing", "allergies": ["peanut
 `MemoryTool` 把一个 `Memory`（可选地带上一个 `SmartWriter`）包装成一个 [工具](tools.md)，这样 agent 就能在对话中途自行决定去记住和召回。像注册其它任何工具一样注册它：
 
 ```python
-from agentbuilder import Agent, Memory, MemoryStore, MemoryTool, LLMClient
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker import Agent, Memory, MemoryStore, MemoryTool, LLMClient
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(OpenAIEmbedder()), store=MemoryStore())
 agent = Agent("assistant", LLMClient("deepseek"), tools=[MemoryTool(memory)])
@@ -189,7 +189,7 @@ memory = Memory(
 要做多用户隔离，就给每个用户各自的 scope。在构造时传入 `scope=`，让每一次写入和读取都留在那个所有者的数据范围内，并且每个用户保持一个 `Memory`（和一个 `SmartWriter`）：
 
 ```python
-from agentbuilder import Scope
+from agentmaker import Scope
 
 alice = Scope(base="memory", user="alice")
 memory = Memory(retriever=..., store=..., scope=alice)

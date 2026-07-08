@@ -6,8 +6,8 @@ via ScriptedLLM.
 
     uv run python examples/07_guardrails_and_hitl.py
 """
-from agentbuilder import Agent, CallableGuardrail, GuardrailTripwireError, tool
-from agentbuilder.testing import MemoryCheckpointStore, ScriptedLLM
+from agentmaker import Agent, CallableGuardrail, GuardrailTripwireError, tool
+from agentmaker.testing import MemoryCheckpointStore, ScriptedLLM
 
 # 1) Guardrail: reject any input that mentions a password.
 no_secrets = CallableGuardrail(lambda text: "password" not in text.lower(),

@@ -1,6 +1,6 @@
 """Hooks dispatch + Guardrails regression (hermetic) -- fills in two core extension points that were thinly covered.
 
-Hooks: nine lifecycle events fire via Agent.run with correctly destructured args (captured with agentbuilder.testing.RecordingHook).
+Hooks: nine lifecycle events fire via Agent.run with correctly destructured args (captured with agentmaker.testing.RecordingHook).
 Guardrails: CallableGuardrail sync / async dispatch, tripping raises GuardrailTripwireError, input vs output stages.
 """
 
@@ -8,11 +8,11 @@ import asyncio
 
 import pytest
 
-from agentbuilder import Agent
-from agentbuilder.core.exceptions import GuardrailTripwireError
-from agentbuilder.runtime.guardrails import CallableGuardrail, GuardrailResult
-from agentbuilder.testing import MemoryCheckpointStore, RecordingHook, ScriptedLLM
-from agentbuilder.tools import Tool, ToolParameter, ToolResponse
+from agentmaker import Agent
+from agentmaker.core.exceptions import GuardrailTripwireError
+from agentmaker.runtime.guardrails import CallableGuardrail, GuardrailResult
+from agentmaker.testing import MemoryCheckpointStore, RecordingHook, ScriptedLLM
+from agentmaker.tools import Tool, ToolParameter, ToolResponse
 
 
 class _EchoTool(Tool):

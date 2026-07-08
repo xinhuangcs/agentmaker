@@ -5,8 +5,8 @@ in-process inspection); other exporters persist to JSONL / SQLite / OpenTelemetr
 
     uv run python examples/13_observability.py
 """
-from agentbuilder import Agent, MemoryExporter, Tracer, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, MemoryExporter, Tracer, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool

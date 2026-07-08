@@ -1,11 +1,11 @@
-"""Shared test fixtures: expose agentbuilder.testing's official doubles as fixtures for reuse across tests.
+"""Shared test fixtures: expose agentmaker.testing's official doubles as fixtures for reuse across tests.
 
-Prefer these fixtures (or importing from agentbuilder.testing) over hand-rolling a fake LLM / embedder / checkpoint in each test.
+Prefer these fixtures (or importing from agentmaker.testing) over hand-rolling a fake LLM / embedder / checkpoint in each test.
 """
 
 import pytest
 
-from agentbuilder.testing import FakeEmbedder, MemoryCheckpointStore, RecordingHook, ScriptedLLM
+from agentmaker.testing import FakeEmbedder, MemoryCheckpointStore, RecordingHook, ScriptedLLM
 
 
 @pytest.fixture

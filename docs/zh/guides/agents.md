@@ -1,6 +1,6 @@
 # Agent 与工作流
 
-一个 Agent（智能体：接收输入、按需调用工具、返回回复的执行单元）接收一份输入，按需在循环中调用工具（tool），最后返回一段回复。agentbuilder 为此提供了一个统一的执行原语（`Agent`）、两种工作流范式（`PlanAgent`、`ReflectionAgent`），以及一种声明式描述它们中任意一个的方式（`AgentSpec` + `build_agent`）。每一种 Agent 策略都返回同一种结果封装 `RunResult`。另有一个独立的适配器 `AgentTool`，把一个 Agent 当作工具交给另一个 Agent 使用；正因为它本身是一个工具，它返回给编排方（orchestrator，即发起委派的上层 Agent）的是 `ToolResponse`，而不是 `RunResult`。
+一个 Agent（智能体：接收输入、按需调用工具、返回回复的执行单元）接收一份输入，按需在循环中调用工具（tool），最后返回一段回复。agentmaker 为此提供了一个统一的执行原语（`Agent`）、两种工作流范式（`PlanAgent`、`ReflectionAgent`），以及一种声明式描述它们中任意一个的方式（`AgentSpec` + `build_agent`）。每一种 Agent 策略都返回同一种结果封装 `RunResult`。另有一个独立的适配器 `AgentTool`，把一个 Agent 当作工具交给另一个 Agent 使用；正因为它本身是一个工具，它返回给编排方（orchestrator，即发起委派的上层 Agent）的是 `ToolResponse`，而不是 `RunResult`。
 
 ## 统一循环
 
@@ -9,8 +9,8 @@
 这一个循环同时覆盖了「chat」和「react」两种用法。ReAct（reason then act，即「先推理再行动」：模型在每次调用工具前先写出自己的推理）不过是同一个循环的一个预设，后文在[声明式构建](#声明式构建)一节展开。
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -35,7 +35,7 @@ result = agent.run("What's the weather in Copenhagen?")
 print(result.final_output)
 ```
 
-`ScriptedLLM` 是 `agentbuilder.testing` 提供的测试替身（test double：测试时用来顶替真实依赖的假对象）：它按预先给定的固定回复列表逐条回放，因此运行 Agent 代码时无需 API key、也无需联网。把它换成 `LLMClient("deepseek")`（或 `"openai"` / `"anthropic"` / `"gemini"`）即可接入真实模型，届时由模型自行决定何时调用工具。参见 [LLM 客户端](llm-clients.md)。
+`ScriptedLLM` 是 `agentmaker.testing` 提供的测试替身（test double：测试时用来顶替真实依赖的假对象）：它按预先给定的固定回复列表逐条回放，因此运行 Agent 代码时无需 API key、也无需联网。把它换成 `LLMClient("deepseek")`（或 `"openai"` / `"anthropic"` / `"gemini"`）即可接入真实模型，届时由模型自行决定何时调用工具。参见 [LLM 客户端](llm-clients.md)。
 
 ### 构造一个 Agent
 
@@ -70,8 +70,8 @@ print(result.final_output)
 下面的示例是自足封闭的（hermetic：不依赖网络或外部服务、可独立运行，`ScriptedLLM` 顶替了真实模型本会生成的内容），开箱即可运行：
 
 ```python
-from agentbuilder import PlanAgent, ReflectionAgent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import PlanAgent, ReflectionAgent
+from agentmaker.testing import ScriptedLLM
 
 # Reflection: draft -> critique -> refine, looping until the critic replies "GOOD ENOUGH"
 # (the default English pass signal; the Chinese pack uses a Chinese one).
@@ -123,7 +123,7 @@ ReflectionAgent(name, llm, system_prompt=None, *, max_turns=3, tool_registry=Non
 除了直接调用构造函数，你还可以用 `AgentSpec`（一个纯配置 dataclass）来描述一个 Agent，再用 `build_agent` 把它构建出来。两种形式并存；声明式只是叠在命令式构造函数之上的一层便捷封装。
 
 ```python
-from agentbuilder import AgentSpec, tool
+from agentmaker import AgentSpec, tool
 
 
 @tool
@@ -138,7 +138,7 @@ print(f"spec: name={spec.name!r} strategy={spec.strategy!r} "
       f"model={spec.model!r} tools={[t.name for t in spec.tools]}")
 
 # To build and run it (needs the provider's API key in your environment):
-#     from agentbuilder import build_agent
+#     from agentmaker import build_agent
 #     agent = build_agent(spec)              # resolves model="deepseek" to a real LLMClient
 #     print(agent.run("what time is it?").final_output)
 print("build with: agent = build_agent(spec)  # needs DEEPSEEK_API_KEY to run")
@@ -165,8 +165,8 @@ print("build with: agent = build_agent(spec)  # needs DEEPSEEK_API_KEY to run")
 orchestrator-worker（协调者-工作者）模式让一个主 Agent 把子任务委派给各领域的专家 Agent，同时始终掌控整段对话。`AgentTool` 通过把一个 Agent 适配成 `Tool` 来实现这一模式，于是主 Agent 委派子任务的方式与调用任何其他工具别无二致。子 Agent 携带自己独立的历史和工具，因此其上下文保持隔离。
 
 ```python
-from agentbuilder import Agent, AgentTool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, AgentTool
+from agentmaker.testing import ScriptedLLM
 
 # The worker: a specialist sub-agent.
 translator = Agent("translator", ScriptedLLM(["Bonjour le monde"]))

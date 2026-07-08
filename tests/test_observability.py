@@ -9,8 +9,8 @@ import sqlite3
 
 import pytest
 
-from agentbuilder.core import trace_events as ev
-from agentbuilder.runtime.observability.exporters import OTelExporter, SqliteExporter
+from agentmaker.core import trace_events as ev
+from agentmaker.runtime.observability.exporters import OTelExporter, SqliteExporter
 
 
 # ---------- event type contract (single source of truth) ----------

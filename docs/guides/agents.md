@@ -1,6 +1,6 @@
 # Agents & workflows
 
-An agent takes one input, optionally calls tools in a loop, and returns a reply. agentbuilder gives you a single execution primitive for that (`Agent`), two workflow recipes for tasks that need a fixed shape (`PlanAgent`, `ReflectionAgent`), and a declarative way to describe any of them (`AgentSpec` + `build_agent`). Every agent strategy returns the same envelope, `RunResult`, so the calling code reads the outcome the same way regardless of which one produced it. A separate adapter, `AgentTool`, hands one agent to another as a tool; because it is a tool, it returns a `ToolResponse` to the orchestrator rather than a `RunResult`.
+An agent takes one input, optionally calls tools in a loop, and returns a reply. agentmaker gives you a single execution primitive for that (`Agent`), two workflow recipes for tasks that need a fixed shape (`PlanAgent`, `ReflectionAgent`), and a declarative way to describe any of them (`AgentSpec` + `build_agent`). Every agent strategy returns the same envelope, `RunResult`, so the calling code reads the outcome the same way regardless of which one produced it. A separate adapter, `AgentTool`, hands one agent to another as a tool; because it is a tool, it returns a `ToolResponse` to the orchestrator rather than a `RunResult`.
 
 ## The unified loop
 
@@ -9,8 +9,8 @@ An agent takes one input, optionally calls tools in a loop, and returns a reply.
 This one loop covers both the "chat" and "react" usages. ReAct (reason then act, the model writes its reasoning before each tool call) is just a preset of the same loop, described later under [Declarative construction](#declarative-construction).
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -35,7 +35,7 @@ result = agent.run("What's the weather in Copenhagen?")
 print(result.final_output)
 ```
 
-`ScriptedLLM` is a test double from `agentbuilder.testing`: it replays a fixed list of replies so agent code runs with no API key and no network. Swap it for `LLMClient("deepseek")` (or `"openai"` / `"anthropic"` / `"gemini"`) to use a real model, which then decides on its own when to call the tool. See [LLM clients](llm-clients.md).
+`ScriptedLLM` is a test double from `agentmaker.testing`: it replays a fixed list of replies so agent code runs with no API key and no network. Swap it for `LLMClient("deepseek")` (or `"openai"` / `"anthropic"` / `"gemini"`) to use a real model, which then decides on its own when to call the tool. See [LLM clients](llm-clients.md).
 
 ### Constructing an Agent
 
@@ -70,8 +70,8 @@ Where `Agent` lets the model decide each next step, the workflow recipes fix the
 The example below is hermetic (`ScriptedLLM` stands in for what a real model would generate) and runs as shipped:
 
 ```python
-from agentbuilder import PlanAgent, ReflectionAgent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import PlanAgent, ReflectionAgent
+from agentmaker.testing import ScriptedLLM
 
 # Reflection: draft -> critique -> refine, looping until the critic replies "GOOD ENOUGH"
 # (the default English pass signal; the Chinese pack uses a Chinese one).
@@ -123,7 +123,7 @@ When a step or critique calls a high-risk tool and a `checkpoint_store` is attac
 Instead of calling a constructor, you can describe an agent with `AgentSpec` (a plain config dataclass) and build it with `build_agent`. The two forms coexist; the declarative one is a convenience on top of the imperative constructors.
 
 ```python
-from agentbuilder import AgentSpec, tool
+from agentmaker import AgentSpec, tool
 
 
 @tool
@@ -138,7 +138,7 @@ print(f"spec: name={spec.name!r} strategy={spec.strategy!r} "
       f"model={spec.model!r} tools={[t.name for t in spec.tools]}")
 
 # To build and run it (needs the provider's API key in your environment):
-#     from agentbuilder import build_agent
+#     from agentmaker import build_agent
 #     agent = build_agent(spec)              # resolves model="deepseek" to a real LLMClient
 #     print(agent.run("what time is it?").final_output)
 print("build with: agent = build_agent(spec)  # needs DEEPSEEK_API_KEY to run")
@@ -165,8 +165,8 @@ Key fields:
 The orchestrator-worker pattern has a main agent delegate sub-tasks to specialist agents and keep control of the conversation. `AgentTool` implements it by adapting an agent into a `Tool`, so the main agent delegates a sub-task exactly like calling any other tool. The sub-agent carries its own independent history and tools, so its context stays isolated.
 
 ```python
-from agentbuilder import Agent, AgentTool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, AgentTool
+from agentmaker.testing import ScriptedLLM
 
 # The worker: a specialist sub-agent.
 translator = Agent("translator", ScriptedLLM(["Bonjour le monde"]))

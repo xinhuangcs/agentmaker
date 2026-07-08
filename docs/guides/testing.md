@@ -1,11 +1,11 @@
 # Testing
 
-`agentbuilder.testing` gives you deterministic test doubles that stand in for the parts of an agent that would otherwise cost money or reach the network: the LLM, the embedder, the checkpoint store, and lifecycle hooks. Swap them in and your agent tests run hermetically (no API key, no network, no flakiness), so you can assert on exactly what your agent does with a scripted set of model responses. Reach for this module whenever you write unit tests for agents, tools, human-in-the-loop flows, or retrieval wiring built on this framework.
+`agentmaker.testing` gives you deterministic test doubles that stand in for the parts of an agent that would otherwise cost money or reach the network: the LLM, the embedder, the checkpoint store, and lifecycle hooks. Swap them in and your agent tests run hermetically (no API key, no network, no flakiness), so you can assert on exactly what your agent does with a scripted set of model responses. Reach for this module whenever you write unit tests for agents, tools, human-in-the-loop flows, or retrieval wiring built on this framework.
 
-These utilities are not re-exported from the top-level `agentbuilder` namespace. Import them directly from the submodule:
+These utilities are not re-exported from the top-level `agentmaker` namespace. Import them directly from the submodule:
 
 ```python
-from agentbuilder.testing import ScriptedLLM, FakeEmbedder, MemoryCheckpointStore, RecordingHook
+from agentmaker.testing import ScriptedLLM, FakeEmbedder, MemoryCheckpointStore, RecordingHook
 ```
 
 The module defines exactly four public doubles:
@@ -24,8 +24,8 @@ The module defines exactly four public doubles:
 Pass a list of script entries to the constructor. Each entry is either a plain `str` (a text reply) or a ready-made `LLMResponse` (for precise control over tool calls, usage, or finish reason):
 
 ```python
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 agent = Agent("assistant", ScriptedLLM(["Hello.", "Goodbye."]))
 assert agent.run("hi").final_output == "Hello."
@@ -52,11 +52,11 @@ To make the scripted model "decide" to call a tool, build the tool-call response
 ScriptedLLM.tool_call(name, arguments=None, *, call_id="call_1", content="") -> LLMResponse
 ```
 
-A typical tool loop scripts two entries: first the model asks to call the tool, then it writes the final answer. This is the shipped [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/01_quickstart.py):
+A typical tool loop scripts two entries: first the model asks to call the tool, then it writes the final answer. This is the shipped [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/01_quickstart.py):
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -81,11 +81,11 @@ result = agent.run("What's the weather in Copenhagen?")
 print(result.final_output)
 ```
 
-The same pattern works when the tools come from a [`ToolRegistry`](tools.md), including built-ins. Note that the name you pass to `tool_call` is the tool's registered name (here the built-in calculator is `"calculator"`), taken from [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/02_tools_and_registry.py):
+The same pattern works when the tools come from a [`ToolRegistry`](tools.md), including built-ins. Note that the name you pass to `tool_call` is the tool's registered name (here the built-in calculator is `"calculator"`), taken from [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/02_tools_and_registry.py):
 
 ```python
-from agentbuilder import Agent, CalculatorTool, ToolRegistry, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, CalculatorTool, ToolRegistry, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -148,14 +148,14 @@ assert "".join(pieces) == "A streamed reply."
 Empty content yields no chunk at all (an empty string produces an empty stream, not a single `""`). On completion the double records the response's usage and finish reason on `last_stream_stats`, matching how real adapters report streaming statistics. To assert on streamed usage or finish reason, script a full `LLMResponse` instead of a bare string:
 
 ```python
-from agentbuilder.core.llm_response import LLMResponse
+from agentmaker.core.llm_response import LLMResponse
 
 llm = ScriptedLLM([LLMResponse(content="hello world", model="test",
                                finish_reason="stop", usage={"total_tokens": 5})])
 ```
 
 !!! note
-    `LLMResponse` lives in `agentbuilder.core.llm_response`. You only need it when you want to pin usage, `finish_reason`, or a precise `tool_calls` payload; for ordinary text replies, a plain string script entry is enough.
+    `LLMResponse` lives in `agentmaker.core.llm_response`. You only need it when you want to pin usage, `finish_reason`, or a precise `tool_calls` payload; for ordinary text replies, a plain string script entry is enough.
 
 ## Asserting on a run
 
@@ -179,7 +179,7 @@ assert result.usage.tool_calls == 1
 `FakeEmbedder` is a deterministic, offline `Embedder`: the same text always maps to the same vector, and different texts map to different vectors (each vector is derived from a SHA-256 hash and L2-normalized, so cosine similarity stays meaningful and retrieval can genuinely tell entries apart). Use it to test retrieval and RAG wiring without calling a real embedding API.
 
 ```python
-from agentbuilder.testing import FakeEmbedder
+from agentmaker.testing import FakeEmbedder
 
 emb = FakeEmbedder(dim=8)
 assert emb.dim == 8
@@ -199,8 +199,8 @@ The constructor takes the vector width, `FakeEmbedder(dim=8)`. `embed(texts)` re
 When the agent tries to run a tool that requires confirmation, the run suspends and returns a `RunResult` with `interrupted == True`. Approve it by calling `resume(True, scope=...)` with the scope carried on the interrupt:
 
 ```python
-from agentbuilder import Agent, Tool, ToolParameter, ToolResponse
-from agentbuilder.testing import MemoryCheckpointStore, ScriptedLLM
+from agentmaker import Agent, Tool, ToolParameter, ToolResponse
+from agentmaker.testing import MemoryCheckpointStore, ScriptedLLM
 
 
 class DeleteTool(Tool):
@@ -235,8 +235,8 @@ See [Guardrails & HITL](guardrails-and-hitl.md) for the full approval model, inc
 `RecordingHook` is a `Hook` that appends every lifecycle event it receives to its `events` list, as `(event_name, key_param)` tuples. Use it to assert that hook dispatch happened in the order you expect. Pass it to the agent via `hooks=[...]`:
 
 ```python
-from agentbuilder import Agent
-from agentbuilder.testing import RecordingHook, ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import RecordingHook, ScriptedLLM
 
 hook = RecordingHook()
 Agent("assistant", ScriptedLLM(["Answer."]), hooks=[hook]).run("Question?")

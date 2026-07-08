@@ -1,4 +1,4 @@
-"""agentbuilder/memory boundary-hardening regression (hermetic: pure sqlite + fake retriever, no key / no network).
+"""agentmaker/memory boundary-hardening regression (hermetic: pure sqlite + fake retriever, no key / no network).
 
 Locks down a hardening pass over the memory subsystem: the source-of-truth composite key doesn't
 overwrite across scopes, get/update are scope-isolated, KV guards against an empty scope, search
@@ -12,14 +12,14 @@ import threading
 
 import pytest
 
-from agentbuilder.core.exceptions import RetrievalError
-from agentbuilder.retrieval.hybrid import require_valid_top_k
-from agentbuilder.memory import Memory, MemoryStore
-from agentbuilder.memory.kv import KVMemory, KVStore
-from agentbuilder.memory.smart_writer import SmartWriter
-from agentbuilder.memory.memory_tool import MemoryTool
-from agentbuilder.memory.types import MemoryItem
-from agentbuilder.retrieval.scope import Scope
+from agentmaker.core.exceptions import RetrievalError
+from agentmaker.retrieval.hybrid import require_valid_top_k
+from agentmaker.memory import Memory, MemoryStore
+from agentmaker.memory.kv import KVMemory, KVStore
+from agentmaker.memory.smart_writer import SmartWriter
+from agentmaker.memory.memory_tool import MemoryTool
+from agentmaker.memory.types import MemoryItem
+from agentmaker.retrieval.scope import Scope
 
 ALICE = Scope(base="memory", user="alice")
 BOB = Scope(base="memory", user="bob")
@@ -112,7 +112,7 @@ def test_consolidate_soft_invalidates_and_averages_importance():
 
 def test_index_sync_close_delegates_to_bookkeeping():
     """SyncIndexSync.close delegates to bookkeeping.close (plugs the connection leak from from_config's default SqliteBookkeeping); the default no-op close doesn't raise."""
-    from agentbuilder.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
+    from agentmaker.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
     closed = []
     bk = InMemoryBookkeeping()
     bk.close = lambda: closed.append(1)
@@ -270,7 +270,7 @@ def test_memory_tool_action_level_confirmation():
 
 
 def test_memory_tool_confirmation_gated_via_registry():
-    from agentbuilder.tools.registry import ToolRegistry
+    from agentmaker.tools.registry import ToolRegistry
 
     asked = []
 
@@ -303,7 +303,7 @@ def test_smart_writer_parses_json_array_regardless():
 
 def test_smart_writer_prompts_overridable():
     """extract_prompt / reconcile_prompt can be overridden via constructor args; omitting them uses the public DEFAULT_* prompts; and they're actually sent to the LLM as the system message."""
-    from agentbuilder.memory import DEFAULT_EXTRACT_PROMPT, DEFAULT_RECONCILE_PROMPT
+    from agentmaker.memory import DEFAULT_EXTRACT_PROMPT, DEFAULT_RECONCILE_PROMPT
 
     class _RecMem:                       # stub memory: only exposes the cfg.similar_k SmartWriter's constructor reads
         cfg = type("C", (), {"similar_k": 5})()
@@ -326,7 +326,7 @@ def test_smart_writer_prompts_overridable():
     assert llm.system == "EX!"
     # an invalid override (dropped a protocol op) is caught by the registry
     import pytest as _pytest
-    from agentbuilder.prompts import PromptError
+    from agentmaker.prompts import PromptError
     with _pytest.raises(PromptError):
         SmartWriter(mem, object(), reconcile_prompt="只输出结论，别的不管")
 
@@ -441,7 +441,7 @@ def test_smart_writer_update_supersedes_softly():
 def test_update_bumps_updated_at_and_recency_anchor():
     """update refreshes updated_at and recency decays off it; with recency_anchor=last_accessed it uses the hit time."""
     from datetime import datetime, timedelta
-    from agentbuilder.memory.types import MemoryConfig
+    from agentmaker.memory.types import MemoryConfig
     m = _memory()
     item = m.add("旧闻")
     # manually set created_at to 30 days ago (edit the source of truth directly)
@@ -470,7 +470,7 @@ def test_search_touches_last_accessed():
 def test_store_old_schema_auto_migrates_columns(tmp_path):
     """An old DB missing new columns (updated_at etc.): opening it ALTERs the columns in automatically, without error (given a correct primary key)."""
     import sqlite3
-    from agentbuilder.retrieval.scope_sql import scope_column_names
+    from agentmaker.retrieval.scope_sql import scope_column_names
     db = str(tmp_path / "old_mem.db")
     conn = sqlite3.connect(db)
     cols = ", ".join(f"{c} TEXT" for c in scope_column_names())
@@ -486,9 +486,9 @@ def test_store_old_schema_auto_migrates_columns(tmp_path):
 
 def test_conversation_search_end_to_end():
     """ConversationSearch: wraps a SessionStore feeding the shared backend (isolated by base=conversation), searchable, and clear wipes the index too."""
-    from agentbuilder.core.message import Message
-    from agentbuilder.runtime import ConversationSearch, SqliteSessionStore
-    from agentbuilder.retrieval.scope import Scope as _S
+    from agentmaker.core.message import Message
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+    from agentmaker.retrieval.scope import Scope as _S
 
     class _ConvRetriever(FakeRetriever):
         def __init__(self):
@@ -518,9 +518,9 @@ def test_conversation_search_end_to_end():
 
 def test_conversation_search_tool_runs():
     """ConversationSearchTool: wraps it as a read-only tool; run returns a readable result (empty query errors)."""
-    from agentbuilder.core.message import Message
-    from agentbuilder.runtime import ConversationSearch, ConversationSearchTool, SqliteSessionStore
-    from agentbuilder.retrieval.scope import Scope as _S
+    from agentmaker.core.message import Message
+    from agentmaker.runtime import ConversationSearch, ConversationSearchTool, SqliteSessionStore
+    from agentmaker.retrieval.scope import Scope as _S
 
     retr = FakeRetriever()
     cs = ConversationSearch(SqliteSessionStore(), retr)
