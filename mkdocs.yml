@@ -10,6 +10,8 @@ theme:
   custom_dir: overrides
   logo: assets/logo.svg
   favicon: assets/logo.svg
+  icon:
+    repo: fontawesome/brands/github
   font:
     text: Outfit
     code: JetBrains Mono

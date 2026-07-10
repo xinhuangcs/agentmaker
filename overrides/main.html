@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block site_meta %}
+  {{ super() }}
+  <script>
+    /* Material fetches the GitHub star/fork counts client-side and caches them in
+       sessionStorage (key "<base>.__source") for the whole browser session, so the
+       numbers can go stale. Expire that cache after 10 minutes. This inline script
+       runs before the deferred theme bundle reads the cache. */
+    (function () {
+      try {
+        var stamp = "__source_fetched_at";
+        var last = +sessionStorage.getItem(stamp) || 0;
+        if (Date.now() - last > 10 * 60 * 1000) {
+          Object.keys(sessionStorage).forEach(function (k) {
+            if (k.slice(-10) === ".__source") sessionStorage.removeItem(k);
+          });
+          sessionStorage.setItem(stamp, String(Date.now()));
+        }
+      } catch (e) { /* private mode etc. — the theme just falls back to its own flow */ }
+    })();
+  </script>
+{% endblock %}
