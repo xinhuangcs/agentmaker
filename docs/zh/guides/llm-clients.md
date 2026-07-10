@@ -148,7 +148,7 @@ async for piece in llm.stream([{"role": "user", "content": "Tell a joke"}]):
 
 ### 流式统计
 
-一次流式调用只 yield 文本，所以每次调用的元数据（metadata）单独存放。在流耗尽之后，读取 `llm.last_stream_stats`（若你还没做过流式调用，则为 `None`）。它暴露 `model`、`finish_reason`、`usage` 和 `latency_ms`。对于 OpenAI 系列厂商，要拿到 token 用量，请求必须显式加入 `stream_options={"include_usage": True}`，否则 `usage` 可能为 `None`。
+一次流式调用只 yield 文本，所以每次调用的元数据（metadata）单独存放。在流耗尽之后，读取 `llm.last_stream_stats`（若你还没做过流式调用，则为 `None`）。它暴露 `model`、`finish_reason`、`usage` 和 `latency_ms`。对于 OpenAI 系列厂商，客户端会自动在流式请求中带上 `stream_options={"include_usage": True}`，所以 `usage` 通常有值；只有当后端本身不上报流式用量时才会是 `None`。
 
 ```python
 async for piece in llm.stream([{"role": "user", "content": "hi"}]):
@@ -281,7 +281,7 @@ LLMClient("myvendor", profile=ProviderProfile(protocol="myproto", default_model=
 
 对于缺少原生函数调用能力的模型，`LLMClient(..., emulate_tools=True)` 会用一层文本模拟垫片包住适配器，让使用工具的 agent 仍能工作。仅在原生函数调用不可用时才启用它，因为模拟方式可靠性较低、还会额外消耗 token。工具系统本身参见 [工具](tools.md)。
 
-## 下一步去哪
+## 下一步去哪里
 
 - [Agent 与工作流](agents.md)：把一个 `LLMClient` 交给 `Agent`，或用 `AgentSpec` 加 `"provider:model"` 字符串以声明式方式配置它。
 - [工具](tools.md)：给模型可调用的函数；`LLMResponse` 上的 `tool_calls` 承载这些请求。

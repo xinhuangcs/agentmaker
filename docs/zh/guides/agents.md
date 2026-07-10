@@ -50,7 +50,7 @@ print(result.final_output)
 
 `Agent` 会自动保存多轮历史，并按 `scope`（作用域）相互隔离，因此单个实例可以服务于多个会话。挂上一个 `session_store` 即可让历史在重启后依然保留。关于 scope 如何为会话建立键值区分，参见[作用域与异步](scope-and-async.md)；关于如何构建工具与注册表，参见[工具](tools.md)。
 
-还有更多可选参数（`confirm`、`permissions`、`checkpoint_store`、`context_builder`、`tool_retriever`、护栏（guardrail）、钩子（hook）等等）用于接入各类横切能力，它们各有专门的指南：[护栏与 HITL](guardrails-and-hitl.md)、[上下文工程](context-engineering.md)、[记忆](memory.md)、[可观测性](observability.md)。
+还有更多可选参数（`confirm`、`permissions`、`checkpoint_store`、`context_builder`、`tool_retriever`、护栏（guardrail）、钩子（hook）等等）用于接入各类横切能力，它们各有专门的指南：[护栏与人在回路](guardrails-and-hitl.md)、[上下文工程](context-engineering.md)、[记忆](memory.md)、[可观测性](observability.md)。
 
 ### 结构化输出
 
@@ -61,13 +61,13 @@ print(result.final_output)
 `Agent.stream_run(input_text, ...)` 会逐片产出回复（其异步对应版本是 `astream_run`，用 `async for` 迭代）。当 Agent 配有工具时，流式循环会走完全相同的轮次结构，并在每一轮的文本到达时随之流式输出。
 
 !!! note
-    流式循环不支持 human-in-the-loop（HITL，人在回路：让人在关键处介入审批）的挂起/恢复，也不支持检查点（checkpoint）。需要确认的工具会退回到它的同步确认回调。当你需要挂起语义时，请改用 `run` / `arun`（参见[返回类型](#返回类型)与[护栏与 HITL](guardrails-and-hitl.md)）。
+    流式循环不支持 human-in-the-loop（HITL，人在回路：让人在关键处介入审批）的挂起/恢复，也不支持检查点（checkpoint）。需要确认的工具会退回到它的同步确认回调。当你需要挂起语义时，请改用 `run` / `arun`（参见[返回类型](#返回类型)与[护栏与人在回路](guardrails-and-hitl.md)）。
 
 ## 工作流范式
 
 `Agent` 让模型自行决定下一步做什么，而工作流范式则在代码里把各阶段的先后顺序固定下来。两者底层都构建在同一个单循环 `Agent` 之上，因此接收相同的 LLM 和相同的工具。
 
-下面的示例是自足封闭的（hermetic：不依赖网络或外部服务、可独立运行，`ScriptedLLM` 顶替了真实模型本会生成的内容），开箱即可运行：
+下面的示例是自洽的（hermetic：不依赖网络或外部服务、可独立运行，`ScriptedLLM` 顶替了真实模型本会生成的内容），开箱即可运行：
 
 ```python
 from agentmaker import PlanAgent, ReflectionAgent
@@ -116,7 +116,7 @@ ReflectionAgent(name, llm, system_prompt=None, *, max_turns=3, tool_registry=Non
 !!! note
     与 `Agent` 不同，`PlanAgent` 和 `ReflectionAgent` 只接受 `tool_registry`（仅限关键字参数），不提供 `tools` 列表这一便捷形式。请先构建一个注册表（参见[工具](tools.md)）再传入。
 
-当某个步骤或批评环节调用了高风险工具、且挂有 `checkpoint_store` 时，该内部运行会挂起以等待审批，中断会沿着范式向上传播；恢复时从该处继续。参见[护栏与 HITL](guardrails-and-hitl.md)。
+当某个步骤或批评环节调用了高风险工具、且挂有 `checkpoint_store` 时，该内部运行会挂起以等待审批，中断会沿着范式向上传播；恢复时从该处继续。参见[护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 声明式构建
 
@@ -183,7 +183,7 @@ print(coordinator.run("How do you say 'hello world' in French?").final_output)
 `AgentTool(agent, *, name=None, description=None, scope=None, prompts=None)` 可包装任意 Agent。`name` 默认取 `agent.name`；`description` 告诉负责协调的模型这个子 Agent 擅长什么、何时该把任务委派给它。该工具只暴露一个 `task` 字符串参数，即交给子 Agent 的那份自足完整的子任务。
 
 !!! note
-    通过 `AgentTool` 调用的子 Agent，无法在委派中途挂起以等待人工审批。如果它触及某个高风险动作，本次委派会返回一个错误结果，告知协调者：该子任务需要人工审批、无法以这种方式完成，从而让协调者改走别的路径。请把高风险动作留在主流程里，或改用 `PlanAgent`，它确实会向上传播嵌套的挂起。参见[护栏与 HITL](guardrails-and-hitl.md)。
+    通过 `AgentTool` 调用的子 Agent，无法在委派中途挂起以等待人工审批。如果它触及某个高风险动作，本次委派会返回一个错误结果，告知协调者：该子任务需要人工审批、无法以这种方式完成，从而让协调者改走别的路径。请把高风险动作留在主流程里，或改用 `PlanAgent`，它确实会向上传播嵌套的挂起。参见[护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 返回类型
 
@@ -210,4 +210,4 @@ else:
 
 `RunUsage` 是一份冻结快照，用于成本核算与额度可观测，含三个字段：`llm_calls`、`tool_calls`、`total_tokens`（均为整次运行的累计值）。
 
-关于 `Interrupt` 对象，以及用于继续一次挂起运行的 `resume(decision)` 流程，参见[护栏与 HITL](guardrails-and-hitl.md)。
+关于 `Interrupt` 对象，以及用于继续一次挂起运行的 `resume(decision)` 流程，参见[护栏与人在回路](guardrails-and-hitl.md)。

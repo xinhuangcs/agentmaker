@@ -205,7 +205,7 @@ You add these one at a time, not all at once, and the same pattern reaches the r
 - **More `sources=`**: RAG retrieval over an ingested corpus (chunking, query transforms, rank fusion, source citations) sits beside memory. See [Retrieval & RAG](retrieval-and-rag.md).
 - **More `tools=`**: MCP servers via `MCPClient`, sub-agents via `AgentTool` for orchestrator-worker setups, and `ToolRetriever` to pick from a large toolset. See [Tools](tools.md).
 - **Smarter memory**: `SmartWriter` extracts facts from a conversation and diffs them against what is already stored, then adds, updates, or deletes, instead of saving raw text. See [Memory](memory.md).
-- **Other run modes**: [structured output](structured-output.md) via `run(..., output_type=Model)`, streaming with `async for` over `agent.stream(...)`, and the `PlanAgent` / `ReflectionAgent` recipes in [Agents & workflows](agents.md).
+- **Other run modes**: [structured output](structured-output.md) via `run(..., output_schema=Model)`, streaming with `async for` over `agent.astream_run(...)`, and the `PlanAgent` / `ReflectionAgent` recipes in [Agents & workflows](agents.md).
 - **Persistence and safety**: sessions, checkpoints (human-in-the-loop), tool permissions, and history compaction. See [Guardrails & human-in-the-loop](guardrails-and-hitl.md) and [Context engineering](context-engineering.md).
 
 ## Debug it with an agent

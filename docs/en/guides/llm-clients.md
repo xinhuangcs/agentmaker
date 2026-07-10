@@ -148,7 +148,7 @@ async for piece in llm.stream([{"role": "user", "content": "Tell a joke"}]):
 
 ### Stream statistics
 
-A stream yields only text, so per-call metadata lives separately. After the stream drains, read `llm.last_stream_stats` (or `None` if you have not streamed yet). It exposes `model`, `finish_reason`, `usage`, and `latency_ms`. For token usage on OpenAI-family providers the request must opt in with `stream_options={"include_usage": True}`, so `usage` may be `None` otherwise.
+A stream yields only text, so per-call metadata lives separately. After the stream drains, read `llm.last_stream_stats` (or `None` if you have not streamed yet). It exposes `model`, `finish_reason`, `usage`, and `latency_ms`. For OpenAI-family providers the client automatically requests streaming usage (`stream_options={"include_usage": True}`), so `usage` is normally populated; it can still be `None` for backends that never report usage on streams.
 
 ```python
 async for piece in llm.stream([{"role": "user", "content": "hi"}]):

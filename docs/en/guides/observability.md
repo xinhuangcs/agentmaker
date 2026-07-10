@@ -131,7 +131,7 @@ from agentmaker import governed_chat
 response = await governed_chat(llm, messages, tracer=tracer, origin="my.recipe")
 ```
 
-It checks the run's limits, awaits `llm.chat(messages, ...)`, records the call's count and token usage, optionally emits a trace event tagged with `origin`, then enforces the hard token limit. Outside a run context it is a zero-overhead no-op. The `tracer` argument is optional; extra keyword arguments pass through to `llm.chat`.
+It checks the run's limits, awaits `llm.chat(messages, ...)`, records the call's count and token usage, optionally emits a trace event tagged with `origin`, then enforces the hard token limit. Outside a run context the governance (limit checks and usage accounting) is a zero-overhead no-op — the LLM call itself, and the trace event if a tracer is passed, still happen. The `tracer` argument is optional; extra keyword arguments pass through to `llm.chat`.
 
 ## Trace Detective (devtools)
 

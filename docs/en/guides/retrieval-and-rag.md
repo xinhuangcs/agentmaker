@@ -302,4 +302,4 @@ Two safety details are built in. `add_document` reads a file from disk, a high-r
 - [Memory](memory.md) is built on the same retrieval foundation and shares its `Scope` isolation.
 - [Context engineering](context-engineering.md) covers how retrieved chunks are budgeted into the prompt and where MMR reuses the vectors carried on each `RetrievalResult`.
 - [Tools](tools.md) and [Guardrails & HITL](guardrails-and-hitl.md) explain the confirmation gate and external-content handling that `RAGTool` relies on.
-- Look up exact signatures in the [API Reference](../reference/core.md).
+- Look up exact signatures in the [API Reference](../reference/retrieval.md).

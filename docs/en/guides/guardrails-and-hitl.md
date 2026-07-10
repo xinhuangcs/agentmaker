@@ -189,7 +189,7 @@ store = SqliteSessionStore("daemon.db")
 agent = Agent("assistant", llm, session_store=store, scope=Scope(user="alice", session="chat-1"))
 ```
 
-`SessionStore` is append-only: each message is one row, only appended and never rewritten. The interface is `append` / `append_many` / `load` / `clear`, each taking a keyword `scope`. `load` and `clear` match all scope dimensions exactly by default (an empty scope reads only the default bucket, never crossing into another session); pass `all_scopes=True` for a deliberate cross-session operation. `SqliteSessionStore` additionally offers `prune(...)` to truncate old history (`keep_last=N` or `before=time`) and `list_scopes(along="session")` to enumerate which sessions exist (each returned `ScopeSummary` carries a `message_count` and first/last timestamps, handy for building a conversation list). Every method has an `a*` async counterpart.
+`SessionStore` is append-only: each message is one row, only appended and never rewritten. The interface is `append` / `append_many` / `load` / `clear`, each taking a keyword `scope`. `load` and `clear` match all scope dimensions exactly by default (an empty scope reads only the default bucket, never crossing into another session); pass `all_scopes=True` for a deliberate cross-session operation. `SqliteSessionStore` additionally offers `prune(...)` to truncate old history (`keep_last=N` or `before=time`) and `list_scopes(along="session")` to enumerate which sessions exist (each returned `ScopeSummary` carries a `message_count` and first/last timestamps, handy for building a conversation list). `append` / `append_many` / `load` / `clear` / `list_scopes` each have an `a*` async counterpart; `prune` is sync-only.
 
 ### Searching past conversations
 

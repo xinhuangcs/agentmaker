@@ -293,13 +293,13 @@ from agentmaker import RAGTool
 rag_tool = RAGTool(pipeline, rag, top_k=5)
 ```
 
-内置了两处安全细节。`add_document` 会从磁盘读文件，属于高风险动作，因此只有它的 `RAGTool.needs_confirmation` 返回 `True`；随后统一的确认关卡会在它运行前要求人工批准（见 [护栏与 HITL](guardrails-and-hitl.md)，其中 HITL 即 human-in-the-loop，人在回路）。而且因为 `search` / `ask` 返回的是来自外部知识库的文本，`RAGTool` 设置了 `external_content = True`，于是执行环境会在把这段文本喂回模型前用防注入定界符把它包起来。传入 `filter_fields=("doc_id", "tag")` 会把这些元数据字段变成模型可以填写的可选工具参数（自然语言自查询）；对应的列必须在构建索引时已通过 `metadata_columns=` 声明。
+内置了两处安全细节。`add_document` 会从磁盘读文件，属于高风险动作，因此只有它的 `RAGTool.needs_confirmation` 返回 `True`；随后统一的确认关卡会在它运行前要求人工批准（见 [护栏与人在回路](guardrails-and-hitl.md)，其中 HITL 即 human-in-the-loop，人在回路）。而且因为 `search` / `ask` 返回的是来自外部知识库的文本，`RAGTool` 设置了 `external_content = True`，于是执行环境会在把这段文本喂回模型前用防注入定界符把它包起来。传入 `filter_fields=("doc_id", "tag")` 会把这些元数据字段变成模型可以填写的可选工具参数（自然语言自查询）；对应的列必须在构建索引时已通过 `metadata_columns=` 声明。
 
 ---
 
-## 下一步去哪
+## 下一步去哪里
 
 - [记忆](memory.md) 建立在同一套检索地基上，并共享它的 `Scope` 隔离。
 - [上下文工程](context-engineering.md) 讲述检索到的分块如何被预算进 prompt，以及 MMR 在哪里复用每个 `RetrievalResult` 上携带的向量。
-- [工具](tools.md) 和 [护栏与 HITL](guardrails-and-hitl.md) 解释了 `RAGTool` 所依赖的确认关卡和外部内容处理。
-- 在 [API 参考](../reference.md) 里查阅精确的签名。
+- [工具](tools.md) 和 [护栏与人在回路](guardrails-and-hitl.md) 解释了 `RAGTool` 所依赖的确认关卡和外部内容处理。
+- 在 [API 参考](../reference/retrieval.md) 里查阅精确的签名（该节由英文 docstring 生成）。

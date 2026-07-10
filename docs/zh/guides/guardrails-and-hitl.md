@@ -1,6 +1,6 @@
-# 护栏与HITL
+# 护栏与人在回路
 
-本指南介绍 Agent 运行外围的安全与控制层：一是**护栏**（guardrails），负责审查输入和输出，一旦违反规则就中断运行；二是HITL（即 human-in-the-loop，指某个动作执行前先由人来批准），在遇到高风险工具调用时挂起运行，等待人做决定。同时也介绍这两者所依赖的配套机制：用于观测运行的生命周期**钩子**（hooks）、用于保存对话历史的**会话**（session）持久化、用于挂起/恢复与崩溃恢复的**检查点**（checkpoints），以及为单次运行设定全局上限的**运行策略**（run policies）。当你需要拦截某些输入、在危险动作前要求批准、保留审计记录，或限制单次运行能做什么时，就查阅本页。
+本指南介绍 Agent 运行外围的安全与控制层：一是**护栏**（guardrails），负责审查输入和输出，一旦违反规则就中断运行；二是 HITL（即 human-in-the-loop，指某个动作执行前先由人来批准），在遇到高风险工具调用时挂起运行，等待人做决定。同时也介绍这两者所依赖的配套机制：用于观测运行的生命周期**钩子**（hooks）、用于保存对话历史的**会话**（session）持久化、用于挂起/恢复与崩溃恢复的**检查点**（checkpoints），以及为单次运行设定全局上限的**运行策略**（run policies）。当你需要拦截某些输入、在危险动作前要求批准、保留审计记录，或限制单次运行能做什么时，就查阅本页。
 
 本页所有内容都基于 [`examples/07_guardrails_and_hitl.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/07_guardrails_and_hitl.py)，它是自洽（hermetic）的，借助 `ScriptedLLM`（LLM 测试替身）实现无需 API key、无需联网即可运行：
 
@@ -12,7 +12,7 @@ uv run python examples/07_guardrails_and_hitl.py
 
 护栏检查一段文本（Agent 的输入或它的最终输出）并返回一个裁决结果。裁决失败即为一次*触发线*（tripwire）：运行停止，并抛出 `GuardrailTripwireError`。你通过 `input_guardrails=[...]`（在模型运行前对用户输入进行检查）和 `output_guardrails=[...]`（在最终输出返回前对其进行检查）把护栏挂到 `Agent` 上。
 
-最快的做法是使用 `CallableGuardrail`，它把任意函数 `fn(text)` 包装成一个护栏。该函数返回一个布尔值（True 让文本通过，False 触发触发线），而你在构造时传入的 `message=` 就成为拦截说明：
+最快的做法是使用 `CallableGuardrail`，它把任意函数 `fn(text)` 包装成一个护栏。该函数返回一个布尔值（True 让文本通过，False 即拉响触发线），而你在构造时传入的 `message=` 就成为拦截说明：
 
 ```python
 from agentmaker import Agent, CallableGuardrail, GuardrailTripwireError, tool
@@ -189,11 +189,11 @@ store = SqliteSessionStore("daemon.db")
 agent = Agent("assistant", llm, session_store=store, scope=Scope(user="alice", session="chat-1"))
 ```
 
-`SessionStore` 是仅追加（append-only）的：每条消息是一行，只追加、从不改写。其接口为 `append` / `append_many` / `load` / `clear`，每个都接受一个关键字参数 `scope`。`load` 和 `clear` 默认精确匹配所有 scope 维度（空 scope 只读取默认桶，绝不跨入另一个会话）；若要有意做跨会话操作，传入 `all_scopes=True`。`SqliteSessionStore` 还额外提供 `prune(...)` 来截断旧历史（`keep_last=N` 或 `before=time`），以及 `list_scopes(along="session")` 来枚举存在哪些会话（每个返回的 `ScopeSummary` 都带有 `message_count` 和首/末时间戳，便于构建会话列表）。每个方法都有一个 `a*` 异步版本。
+`SessionStore` 是仅追加（append-only）的：每条消息是一行，只追加、从不改写。其接口为 `append` / `append_many` / `load` / `clear`，每个都接受一个关键字参数 `scope`。`load` 和 `clear` 默认精确匹配所有 scope 维度（空 scope 只读取默认桶，绝不跨入另一个会话）；若要有意做跨会话操作，传入 `all_scopes=True`。`SqliteSessionStore` 还额外提供 `prune(...)` 来截断旧历史（`keep_last=N` 或 `before=time`），以及 `list_scopes(along="session")` 来枚举存在哪些会话（每个返回的 `ScopeSummary` 都带有 `message_count` 和首/末时间戳，便于构建会话列表）。`append` / `append_many` / `load` / `clear` / `list_scopes` 各有 `a*` 异步版本；`prune` 仅同步。
 
 ### 检索过往对话
 
-`ConversationSearch` 包裹任意 `SessionStore`，使过往对话可按语义检索（情景式回忆，即“我们之前聊过什么”）。它本身也是一个 `SessionStore`，所以你可以用它替换普通存储直接挂上；在常规方法之上，它新增了 `search(query, *, top_k=5, scope=None)`，返回一个 `RetrievalResult` 列表。它需要一个共享的检索骨干（一个 `HybridRetriever`）来建立索引：
+`ConversationSearch` 包裹任意 `SessionStore`，使过往对话可按语义检索（情景式回忆，即「我们之前聊过什么」）。它本身也是一个 `SessionStore`，所以你可以用它替换普通存储直接挂上；在常规方法之上，它新增了 `search(query, *, top_k=5, scope=None)`，返回一个 `RetrievalResult` 列表。它需要一个共享的检索骨干（一个 `HybridRetriever`）来建立索引：
 
 ```python
 from agentmaker import ConversationSearch, SqliteSessionStore
@@ -241,7 +241,7 @@ except RunLimitExceeded as e:
 各字段（每个取 `None` 表示不限）：
 
 - `max_llm_calls`：本次运行中 LLM 调用的最大次数（含流式和嵌套的子执行器）；必须 `>= 1`。
-- `max_tool_calls`：*实际执行*的工具最大次数（被权限或确认拦下的调用不计入）；必须 `>= 0`。设为 `0` 会在本次运行中禁用工具：LLM 仍可被调用，但模型一旦试图执行工具，运行立即中止（一种硬性的“只读/安全模式”）。
+- `max_tool_calls`：*实际执行*的工具最大次数（被权限或确认拦下的调用不计入）；必须 `>= 0`。设为 `0` 会在本次运行中禁用工具：LLM 仍可被调用，但模型一旦试图执行工具，运行立即中止（一种硬性的「只读/安全模式」）。
 - `max_tokens`：累计 token 上限（各 LLM 响应 `usage.total_tokens` 之和）；必须 `>= 1`。
 - `deadline_seconds`：从运行开始计的墙钟时间上限；必须 `> 0`。
 - `cancel`：一个快速、非阻塞的回调 `() -> bool`，在每次 LLM 和工具调用前检查；返回 `True` 则中止。当一个 Agent 服务多个会话时，该回调可以调用 `current_run_id()` 来判断它当前看的是哪一次运行。

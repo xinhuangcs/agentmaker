@@ -1,6 +1,6 @@
 # 测试
 
-`agentmaker.testing` 为你提供确定性的测试替身（test double，即用来在测试里顶替真实依赖的假实现），去替换 Agent 中那些原本要花钱或要访问网络的部分：LLM、embedder（嵌入器，把文本转成向量的组件）、检查点存储，以及生命周期钩子。把它们换进去，你的 Agent 测试就能在隔离环境中运行（不需要 API key、不联网、也不会有偶发抖动），从而可以针对一组预先编排好的模型响应，精确断言你的 Agent 到底做了什么。只要你为基于本框架构建的 Agent、tool、human-in-the-loop（HITL，即「人在回路」，高风险动作需人工确认的流程）或检索接线编写单元测试，就该用到这个模块。
+`agentmaker.testing` 为你提供确定性的测试替身（test double，即用来在测试里顶替真实依赖的假实现），去替换 Agent 中那些原本要花钱或要访问网络的部分：LLM、embedder（嵌入器，把文本转成向量的组件）、检查点存储，以及生命周期钩子。把它们换进去，你的 Agent 测试就能自洽（hermetic）运行：不需要 API key、不联网、也不会有偶发抖动，从而可以针对一组预先编排好的模型响应，精确断言你的 Agent 到底做了什么。只要你为基于本框架构建的 Agent、tool、human-in-the-loop（HITL，即「人在回路」，高风险动作需人工确认的流程）或检索接线编写单元测试，就该用到这个模块。
 
 这些工具不会从顶层 `agentmaker` 命名空间重新导出，请直接从子模块导入：
 
@@ -228,7 +228,7 @@ resumed = agent.resume(True, scope=result.interrupt.scope)
 assert resumed.final_output == "Done."
 ```
 
-完整的审批模型（包括拒绝动作以及一次性批准多个待处理调用）见 [护栏与 HITL](guardrails-and-hitl.md)。
+完整的审批模型（包括拒绝动作以及一次性批准多个待处理调用）见 [护栏与人在回路](guardrails-and-hitl.md)。
 
 ## RecordingHook
 

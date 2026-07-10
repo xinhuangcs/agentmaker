@@ -1,6 +1,6 @@
 # agentmaker
 
-一个通用的 Python 框架，用于构建 LLM Agent（大模型智能体）与多 agent 系统，内置工具（tool）、记忆、检索 / RAG（Retrieval-Augmented Generation，检索增强生成，即先检索资料再让模型作答）、上下文工程、护栏、human-in-the-loop（HITL，人在环中，即关键步骤交由人工确认）以及可观测性。
+一个通用的 Python 框架，用于构建 LLM Agent（大模型智能体）与多 agent 系统，内置工具（tool）、记忆、检索 / RAG（Retrieval-Augmented Generation，检索增强生成，即先检索资料再让模型作答）、上下文工程、护栏、human-in-the-loop（HITL，人在回路，即关键步骤交由人工确认）以及可观测性。
 
 ## 安装
 
@@ -46,9 +46,9 @@ print(result.final_output)
 
 ## 下一步去哪里
 
-- 初次接触？从 [快速上手](guides/quickstart.md) 开始。
-- 从 **指南** 中挑一个能力：[LLM 客户端](guides/llm-clients.md)、[Agent 与工作流](guides/agents.md)、[工具](guides/tools.md)、[结构化输出](guides/structured-output.md)、[记忆](guides/memory.md)、[检索与 RAG](guides/retrieval-and-rag.md)、[上下文工程](guides/context-engineering.md)、[护栏与 HITL](guides/guardrails-and-hitl.md)、[可观测性](guides/observability.md)、[提示词注册表](guides/prompts.md)、[技能](guides/skills.md)。
-- 在 [API 参考](reference.md)（由源码 docstring 生成）中查阅确切的函数签名。
+- 初次接触？从 [快速开始](guides/quickstart.md) 开始。
+- 从 **指南** 中挑一个能力：[LLM 客户端](guides/llm-clients.md)、[Agent 与工作流](guides/agents.md)、[工具](guides/tools.md)、[结构化输出](guides/structured-output.md)、[记忆](guides/memory.md)、[检索与 RAG](guides/retrieval-and-rag.md)、[上下文工程](guides/context-engineering.md)、[护栏与人在回路](guides/guardrails-and-hitl.md)、[可观测性](guides/observability.md)、[提示词注册表](guides/prompts.md)、[技能](guides/skills.md)。
+- 在 [API 参考](reference/core.md)（由英文源码 docstring 生成）中查阅确切的函数签名。
 
 ## 版本策略
 

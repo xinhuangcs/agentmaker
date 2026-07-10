@@ -171,7 +171,7 @@ agent = Agent("assistant", LLMClient("deepseek"), tools=[MemoryTool(memory)])
 
 这个工具接收一个 `action` 加上一个 `content` 或 `query`，并分派到：`remember`、`recall`、`summary`、`stats`、`forget` 和 `consolidate`。传入一个 `writer=` 可让 `remember` 走 `SmartWriter`，从而自动去重和重写，而不是走一次普通的 `add`。
 
-由于某些动作会修改或删除已存的数据，`MemoryTool` 会把它们挡在人工确认之后：`forget` 和 `consolidate` 始终需要确认，`remember` 在挂了 writer 时也需要（因为 `SmartWriter` 可能会更新或删除已有记忆）。读取动作（`recall`、`summary`、`stats`）以及一次普通的 add 会直接放行。这道由 writer 触发的确认默认开启；传入 `MemoryTool(memory, writer, confirm_writer_edits=False)` 即可关闭它。确认关卡是如何接线的，见 [护栏与 HITL](guardrails-and-hitl.md)（人在回路）。
+由于某些动作会修改或删除已存的数据，`MemoryTool` 会把它们挡在人工确认之后：`forget` 和 `consolidate` 始终需要确认，`remember` 在挂了 writer 时也需要（因为 `SmartWriter` 可能会更新或删除已有记忆）。读取动作（`recall`、`summary`、`stats`）以及一次普通的 add 会直接放行。这道由 writer 触发的确认默认开启；传入 `MemoryTool(memory, writer, confirm_writer_edits=False)` 即可关闭它。确认关卡是如何接线的，见 [护栏与人在回路](guardrails-and-hitl.md)（人在回路）。
 
 ## 持久化与隔离
 

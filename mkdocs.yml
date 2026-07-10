@@ -7,25 +7,92 @@ repo_name: xinhuangcs/agentmaker
 theme:
   name: material
   language: en
+  custom_dir: overrides
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: Outfit
+    code: JetBrains Mono
   features:
     - navigation.sections
     - navigation.top
     - navigation.tracking
+    - navigation.footer
+    # navigation.instant triggers a static-i18n warning about the language switcher:
+    # instant page swaps do not re-render the header, so docs/js/extra.js recomputes
+    # the language toggle's href after every swap (and the toggle itself opts out of
+    # instant loading via target=_self). Safe to keep both.
+    - navigation.instant
+    - navigation.instant.progress
     - content.code.copy
     - toc.follow
     - search.suggest
+    - search.highlight
+  # Dark-first palette, brand colors defined in stylesheets/extra.css (from site/design-tokens.md)
   palette:
-    - scheme: default
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark mode
     - scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
 
 plugins:
   - search
+  # Bilingual build: docs/en/ at the root, docs/zh/ under /zh/, with per-page language
+  # switching and English fallback for pages that have no translation yet.
+  - i18n:
+      docs_structure: folder
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: zh
+          name: 中文
+          build: true
+          site_description: 通用的 LLM Agent 开发框架：工具、技能、记忆、RAG、上下文工程、护栏、人在回路与可观测性。
+          theme:
+            language: zh
+          nav_translations:
+            Home: 首页
+            Installation: 安装
+            Guides: 指南
+            Quickstart: 快速开始
+            LLM clients & providers: LLM 客户端与厂商
+            Agents & workflows: Agent 与工作流
+            Tools: 工具
+            Structured output: 结构化输出
+            Memory: 记忆
+            Retrieval & RAG: 检索与 RAG
+            Context engineering: 上下文工程
+            Guardrails & human-in-the-loop: 护栏与人在回路
+            Observability: 可观测性
+            Prompt registry: 提示词注册表
+            Skills: 技能
+            Scope & async: Scope 与异步
+            Testing: 测试
+            API Reference: API 参考
+            Core: 核心
+            Agents: Agent
+            Retrieval: 检索
+            Context: 上下文
+            Runtime: 运行时
+            Prompts: 提示词
+            Config: 配置
+  # Explicit autorefs config: with the bilingual build every API symbol gets an anchor
+  # in both /reference/ and /zh/reference/; resolve_closest picks the same-language one.
+  - autorefs:
+      resolve_closest: true
   - mkdocstrings:
       handlers:
         python:
@@ -33,6 +100,17 @@ plugins:
           options:
             show_source: false
             members_order: source
+            merge_init_into_class: true
+            docstring_options:
+              ignore_init_summary: true
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            line_length: 76
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_root_heading: true
+            filters: ["!^_"]
             # No docstring_style declared: this project's docstrings use Google-style
             # English sections (Args:/Returns:/Raises:), rendered by the default parser.
 
@@ -52,16 +130,13 @@ markdown_extensions:
         kwds:
           case: lower
 
-# Bilingual site: English at the root, 中文 under /zh/. The language switcher below is
-# a native mkdocs-material feature (no extra plugin).
-extra:
-  alternate:
-    - name: English
-      link: /agentmaker/
-      lang: en
-    - name: 中文
-      link: /agentmaker/zh/
-      lang: zh
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+
+
 
 nav:
   - Home: index.md
@@ -94,22 +169,3 @@ nav:
       - Prompts: reference/prompts.md
       - Config: reference/config.md
       - Testing: reference/testing.md
-  - 中文:
-      - 首页: zh/index.md
-      - 安装: zh/installation.md
-      - 指南:
-          - 快速开始: zh/guides/quickstart.md
-          - LLM 客户端与厂商: zh/guides/llm-clients.md
-          - Agent 与工作流: zh/guides/agents.md
-          - 工具: zh/guides/tools.md
-          - 结构化输出: zh/guides/structured-output.md
-          - 记忆: zh/guides/memory.md
-          - 检索与 RAG: zh/guides/retrieval-and-rag.md
-          - 上下文工程: zh/guides/context-engineering.md
-          - 护栏与人在回路: zh/guides/guardrails-and-hitl.md
-          - 可观测性: zh/guides/observability.md
-          - 提示词注册表: zh/guides/prompts.md
-          - 技能: zh/guides/skills.md
-          - Scope 与异步: zh/guides/scope-and-async.md
-          - 测试: zh/guides/testing.md
-      - API 参考: zh/reference.md

@@ -243,7 +243,7 @@ from agentmaker import Agent, cli_confirm
 agent = Agent("assistant", llm, tools=[CLITool(allowed_commands=["ls"])], confirm=cli_confirm)
 ```
 
-`cli_confirm` 是内置的命令行提示（在 stdin 上问一个 `y/n` 问题）。如果你不传 `confirm`，高风险调用会默认被安全地拒绝（模型收到一条可读的错误，而不是让动作在未确认的情况下执行）。对于服务端或异步的审批流程，请使用 human-in-the-loop（HITL，人在回路，即让一次运行暂停、等人来批准或修改某个待定动作的模式）；见 [护栏与 HITL](guardrails-and-hitl.md)。
+`cli_confirm` 是内置的命令行提示（在 stdin 上问一个 `y/n` 问题）。如果你不传 `confirm`，高风险调用会默认被安全地拒绝（模型收到一条可读的错误，而不是让动作在未确认的情况下执行）。对于服务端或异步的审批流程，请使用 human-in-the-loop（HITL，人在回路，即让一次运行暂停、等人来批准或修改某个待定动作的模式）；见 [护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 工具权限
 

@@ -1,6 +1,6 @@
-# 快速上手
+# 快速开始
 
-本指南用十几行代码构建一个可运行的 Agent（智能体，能自主调用工具完成任务的程序）：把一个函数变成工具（tool），用一个脚本化的测试模型顶替真实的 LLM（大语言模型），因此无需 API key、无需联网即可运行，随后 Agent 以「模型在一个循环里调用工具」的方式跑完一轮，交回最终答案。如果你刚接触 agentmaker，请先读这一篇；其余每篇指南都默认你脑中已有这个基本形态。本文逐行讲解 [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/01_quickstart.py)，再演示如何把测试模型换成真实的服务商。
+本指南用十几行代码构建一个可运行的 Agent（智能体，能自主调用工具完成任务的程序）：把一个函数变成工具（tool），用一个脚本化的测试模型顶替真实的 LLM（大语言模型），因此无需 API key、无需联网即可运行，随后 Agent 以「模型在一个循环里调用工具」的方式跑完一轮，交回最终答案。如果你刚接触 agentmaker，请先读这一篇；其余每篇指南都默认你脑中已有这个基本形态。本文逐行讲解 [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/01_quickstart.py)，再演示如何把测试模型换成真实的厂商。
 
 ## 完整程序
 
@@ -77,7 +77,7 @@ llm = ScriptedLLM([
 ])
 ```
 
-`ScriptedLLM` 是一个测试替身（test double）：它按调用顺序吐出预设好的响应，而不去联系真实服务商，因此 Agent 测试既不产生费用也不需要联网。它位于 `agentmaker.testing`，不属于顶层公开接口，所以要显式导入 `from agentmaker.testing import ScriptedLLM`。
+`ScriptedLLM` 是一个测试替身（test double）：它按调用顺序吐出预设好的响应，而不去联系真实厂商，因此 Agent 测试既不产生费用也不需要联网。它位于 `agentmaker.testing`，不属于顶层公开接口，所以要显式导入 `from agentmaker.testing import ScriptedLLM`。
 
 脚本列表中的每一项，要么是：
 
@@ -121,7 +121,7 @@ print(result.final_output)
 `RunResult` 是对结果的统一封装，而不是一个裸字符串。它的主字段是 `final_output`，即本次运行完成后的答案（这里是字符串；如果你请求了 [结构化输出](structured-output.md)，则是一个结构化实例）。其它字段可用来审视这次运行：
 
 - `result.status`：`"completed"` 或 `"interrupted"`。
-- `result.interrupted`：一个便捷布尔值，当运行因等待人工审批而挂起时为 `True`（见 [护栏与人在环路](guardrails-and-hitl.md)）。
+- `result.interrupted`：一个便捷布尔值，当运行因等待人工审批而挂起时为 `True`（见 [护栏与人在回路](guardrails-and-hitl.md)）。
 - `result.usage`：一个 `RunUsage` 快照，含 `llm_calls`、`tool_calls` 和 `total_tokens`。
 - `result.new_messages`：本轮加入历史的用户消息与助手消息。
 - `result.run_id`：本次运行的 trace 关联 id。
@@ -161,7 +161,7 @@ result = agent.run("What's the weather in Copenhagen?")
 print(result.final_output)
 ```
 
-`LLMClient(provider)` 会解析该服务商的配置，并从你的环境中读取它的 API key。provider 默认为 `"deepseek"`，且每家云厂商都预填了默认模型，因此 `LLMClient("deepseek")` 无需再写别的。为你选定的服务商设置对应的 key：
+`LLMClient(provider)` 会解析该厂商的配置，并从你的环境中读取它的 API key。provider 默认为 `"deepseek"`，且每家云厂商都预填了默认模型，因此 `LLMClient("deepseek")` 无需再写别的。为你选定的厂商设置对应的 key：
 
 | 调用 | 读取的环境变量 |
 | --- | --- |
@@ -170,9 +170,9 @@ print(result.final_output)
 | `LLMClient("anthropic")` | `ANTHROPIC_API_KEY` |
 | `LLMClient("gemini")` | `GEMINI_API_KEY`（或 `GOOGLE_API_KEY`） |
 
-设置方式：在 shell 里执行 `export DEEPSEEK_API_KEY="sk-..."`（PowerShell：`$env:DEEPSEEK_API_KEY = "sk-..."`），或配合 python-dotenv 使用 `.env` 文件——见[安装页的「厂商 API 密钥」](../installation.md)。
+设置方式：在 shell 里执行 `export DEEPSEEK_API_KEY="sk-..."`（PowerShell：`$env:DEEPSEEK_API_KEY = "sk-..."`），或配合 python-dotenv 使用 `.env` 文件——见[安装页的「厂商 API 密钥」](../installation.md#厂商-api-密钥)。
 
-传入 `model=` 可指定具体模型，例如 `LLMClient("openai", model="gpt-4.1-nano")`。完整的服务商列表、自托管与 OpenAI 兼容端点、以及逐次调用的选项，见 [LLM 客户端与服务商](llm-clients.md)。
+传入 `model=` 可指定具体模型，例如 `LLMClient("openai", model="gpt-4.1-nano")`。完整的厂商列表、自托管与 OpenAI 兼容端点、以及逐次调用的选项，见 [LLM 客户端与厂商](llm-clients.md)。
 
 其余一切保持不变：`@tool` 定义、`Agent` 构造、`run(...)` 和 `result.final_output` 的行为都完全一致。这正是 `ScriptedLLM` 的意义所在，你的测试代码和生产代码走的是同一个循环。
 
@@ -205,8 +205,8 @@ print(agent.run("Plan a day in Copenhagen, and remember I'm vegetarian.").final_
 - **更多 `sources=`**：对已摄入语料的 RAG 检索（分块、查询改写、名次融合、来源引用）与记忆并列。见 [检索与 RAG](retrieval-and-rag.md)。
 - **更多 `tools=`**：通过 `MCPClient` 接入 MCP 服务器、通过 `AgentTool` 把子 agent 当工具（orchestrator-worker 多 agent 编排）、以及用 `ToolRetriever` 从庞大工具集中挑选。见 [工具](tools.md)。
 - **更聪明的记忆**：`SmartWriter` 从对话里抽取事实、与已存内容做差分，再增 / 改 / 删，而不是照原文存。见 [记忆](memory.md)。
-- **其它运行模式**：用 `run(..., output_type=Model)` 得到[结构化输出](structured-output.md)、用 `async for` 遍历 `agent.stream(...)` 做流式、以及 [Agent 与工作流](agents.md) 里的 `PlanAgent` / `ReflectionAgent` 配方。
-- **持久化与安全**：会话（session）、检查点（checkpoint，人在环路）、工具权限、历史压缩。见 [护栏与人在环路](guardrails-and-hitl.md) 与 [上下文工程](context-engineering.md)。
+- **其它运行模式**：用 `run(..., output_schema=Model)` 得到[结构化输出](structured-output.md)、用 `async for` 遍历 `agent.astream_run(...)` 做流式、以及 [Agent 与工作流](agents.md) 里的 `PlanAgent` / `ReflectionAgent` 配方。
+- **持久化与安全**：会话（session）、检查点（checkpoint，人在回路）、工具权限、历史压缩。见 [护栏与人在回路](guardrails-and-hitl.md) 与 [上下文工程](context-engineering.md)。
 
 ## 用 agent 调试
 
@@ -225,9 +225,9 @@ print(agent.run("What's the weather in Copenhagen?").final_output)
 
 ## 下一步去哪里
 
-- [LLM 客户端与服务商](llm-clients.md)：每一家服务商、模型选择与流式输出。
+- [LLM 客户端与厂商](llm-clients.md)：每一家厂商、模型选择与流式输出。
 - [Agent 与工作流](agents.md)：完整的 `Agent` 接口，以及 plan-and-execute（先规划后执行）与 reflection（反思）配方。
 - [工具](tools.md)：更丰富的工具、确认关卡、并行执行与工具注册表。
 - [结构化输出](structured-output.md)：返回一个经过校验的对象而非文本。
-- [护栏与人在环路](guardrails-and-hitl.md)：输入与输出护栏，以及对高风险动作的审批。
-- [测试](testing.md)：`ScriptedLLM` 及其它测试替身，用于隔离环境（hermetic）下的 Agent 测试。
+- [护栏与人在回路](guardrails-and-hitl.md)：输入与输出护栏，以及对高风险动作的审批。
+- [测试](testing.md)：`ScriptedLLM` 及其它测试替身，用于自洽（hermetic，不需要 API key、不联网）的 Agent 测试。

@@ -46,7 +46,7 @@ print("bob sees:  ", [h.content for h in bob.search("favorite drink", top_k=5)])
 
 ### 过滤语义
 
-Scope 只在非空维度上做过滤。一次读操作会为你赋了值的每个维度加上一条约束，而对未设置的维度完全不作限制。因此 `Scope(user="alice")` 会返回 Alice 的全部记录，无论它们由哪个 Agent 或哪个会话产生；而某个维度为空，就意味着"这一维匹配任何值"。包括 `base` 在内的每个维度都遵循同样的规则：空即不限制。
+Scope 只在非空维度上做过滤。一次读操作会为你赋了值的每个维度加上一条约束，而对未设置的维度完全不作限制。因此 `Scope(user="alice")` 会返回 Alice 的全部记录，无论它们由哪个 Agent 或哪个会话产生；而某个维度为空，就意味着「这一维匹配任何值」。包括 `base` 在内的每个维度都遵循同样的规则：空即不限制。
 
 `base` 用于区分诸如 memory 和 RAG（retrieval-augmented generation，检索增强生成，即把检索到的文档喂进 prompt）这类子系统。按照约定，每个上层都会显式传入它，这也是上面示例使用 `Scope(base="memory", user="alice")` 的原因：`Memory` 在 `base="memory"` 下工作，因此它的数据不会与共用同一文件的 RAG 存储发生碰撞。
 
@@ -67,7 +67,7 @@ agent.run("hello")                            # recorded under Scope(user="alice
 agent.run("hello", scope=Scope(user="bob"))   # a separate session on the same instance
 ```
 
-当为 `Agent` 提供了 `session_store` 时，历史会按 scope 持久化，并在每次运行时按 scope 重新加载，因此长时间运行的守护进程在重启后不会丢失对话。用于 HITL（human in the loop，人工介入，即暂停一次运行以等待批准）和崩溃恢复的检查点，同样以 scope 为键。那些委托给内部子 Agent 的编排配方，会在派生出的子 scope 下运行每个子 Agent，因此子 Agent 的历史和检查点永远不会与其父级碰撞。挂起与恢复的流程参见 [护栏与 HITL](guardrails-and-hitl.md)。
+当为 `Agent` 提供了 `session_store` 时，历史会按 scope 持久化，并在每次运行时按 scope 重新加载，因此长时间运行的守护进程在重启后不会丢失对话。用于 HITL（human-in-the-loop，人在回路，即暂停一次运行以等待人工批准）和崩溃恢复的检查点，同样以 scope 为键。那些委托给内部子 Agent 的编排配方，会在派生出的子 scope 下运行每个子 Agent，因此子 Agent 的历史和检查点永远不会与其父级碰撞。挂起与恢复的流程参见 [护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 异步
 

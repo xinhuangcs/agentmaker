@@ -131,7 +131,7 @@ from agentmaker import governed_chat
 response = await governed_chat(llm, messages, tracer=tracer, origin="my.recipe")
 ```
 
-它会检查本次运行的限额，await `llm.chat(messages, ...)`，记录该次调用的计数与 token 用量，可选地产出一个带 `origin` 标签的 trace 事件，然后强制执行硬性 token 上限。在运行上下文之外，它是一个零开销的空操作。`tracer` 参数是可选的；额外的关键字参数会透传给 `llm.chat`。
+它会检查本次运行的限额，await `llm.chat(messages, ...)`，记录该次调用的计数与 token 用量，可选地产出一个带 `origin` 标签的 trace 事件，然后强制执行硬性 token 上限。在运行上下文之外，治理部分（限额检查与用量记账）是零开销的空操作——LLM 调用本身、以及传入 tracer 时的 trace 事件，仍会照常发生。`tracer` 参数是可选的；额外的关键字参数会透传给 `llm.chat`。
 
 ## Trace 侦探（devtools） { #trace-侦探-devtools }
 
@@ -183,4 +183,4 @@ agent.run("...")   # a failed tool / truncation / exception now prints a three-p
 抛异常的运行总会触发诊断；正常结束的运行，仅当其 trace 携带的发现达到或超过 hook 的 `severity` 阈值（默认 `"error"`，覆盖工具失败与截断；`"warn"` 会放宽到包含空检索及其它降级情形）时才触发。诊断用的 LLM 从环境 key 惰性构建，你也可以用 `llm=` 直接交给它一个现成的客户端（或用 `provider=` / `model=` 选择付费厂商）。hook 内部的每个失败都会被捕获并作为一行控制台信息报告，因此坏掉的诊断永远不会影响运行本身的结果。
 
 !!! note
-    `DoctorHook` 是一个生命周期 `Hook`，也就是 [护栏与 HITL](guardrails-and-hitl.md) 里介绍的那个扩展点。它在一个全新的上下文下、于一个工作线程里运行诊断，因此永远不会消耗宿主运行的限额：即便一次因运行限额错误而死掉的运行，仍然可以被诊断。
+    `DoctorHook` 是一个生命周期 `Hook`，也就是 [护栏与人在回路](guardrails-and-hitl.md) 里介绍的那个扩展点。它在一个全新的上下文下、于一个工作线程里运行诊断，因此永远不会消耗宿主运行的限额：即便一次因运行限额错误而死掉的运行，仍然可以被诊断。

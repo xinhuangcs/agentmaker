@@ -73,7 +73,7 @@ person = result.final_output
 send_to_database(person.name, person.age)
 ```
 
-护栏（guardrail）与对话历史在结构化通路上依然生效。当框架需要输出的文本形式时（用来检查输出护栏，或把这一轮持久化进历史），它会用 `model_dump_json()` 序列化模型，所以落进历史的是你对象的 JSON 形式。输出护栏见 [护栏与 HITL](guardrails-and-hitl.md)。
+护栏（guardrail）与对话历史在结构化通路上依然生效。当框架需要输出的文本形式时（用来检查输出护栏，或把这一轮持久化进历史），它会用 `model_dump_json()` 序列化模型，所以落进历史的是你对象的 JSON 形式。输出护栏见 [护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 调整重试
 

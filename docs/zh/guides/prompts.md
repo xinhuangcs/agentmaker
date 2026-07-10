@@ -145,9 +145,9 @@ print(reg.render("myapp.greeting", name="Ada"))
 
 `register` 只会添加新键：注册一个已经存在的键会抛出 `PromptError`，因此你不会不小心覆盖掉某条内置提示词。要修改一个已有条目，请改用 `update_prompts`（或注册表的 `override` / `with_overrides`）。
 
-## 下一步去哪
+## 下一步去哪里
 
 - [Agent 与工作流](agents.md)：了解 `prompts=` 构造参数，以及一个 agent 的注册表如何流向它的 harness 和子 agent。
 - [工具](tools.md)：了解工具描述和错误文案，它们全都是你可以改写的注册表条目。
 - [结构化输出](structured-output.md)、[记忆](memory.md) 和 [检索与 RAG](retrieval-and-rag.md)：了解这些子系统，它们的提示词（schema 指令、事实抽取、基于来源的作答）都收录在这份目录里。
-- [提示词 API 参考](../reference.md)：查看确切的签名。
+- [提示词 API 参考](../reference/prompts.md)：查看确切的签名（该节由英文 docstring 生成）。
