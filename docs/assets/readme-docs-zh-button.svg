@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="137" height="42" viewBox="0 0 137 42" role="img" aria-labelledby="title">
+  <title id="title">Read the agentmaker documentation in Chinese</title>
+  <rect x="0.5" y="0.5" width="136" height="41" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <path d="M12.5 14.5c3.8-.9 6.6-.2 8.5 1.7v13c-1.9-1.9-4.7-2.6-8.5-1.7Zm17 0c-3.8-.9-6.6-.2-8.5 1.7v13c1.9-1.9 4.7-2.6 8.5-1.7Z" fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linejoin="round"/>
+  <text x="39" y="26.3" fill="#1f2328" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif" font-size="15" font-weight="600">中文文档</text>
+  <path d="m116 16 5 5-5 5m5-5h-10" fill="none" stroke="#57606a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
