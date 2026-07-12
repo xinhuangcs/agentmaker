@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0      # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e    # v6.8.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990    # v8.3.2
         with:
           enable-cache: false              # no cache on the release path (avoid cache poisoning)
       - run: uv sync --locked
@@ -41,7 +41,7 @@ jobs:
           commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
           git merge-base --is-ancestor "$commit" origin/main \
             || { echo "tag commit $commit is not an ancestor of origin/main"; exit 1; }
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e    # v6.8.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990    # v8.3.2
         with:
           enable-cache: false              # no cache on the release path (avoid cache poisoning)
       - run: uv build
