@@ -5,8 +5,8 @@ Hermetic via ScriptedLLM: the scripts stand in for what a real model would gener
 
     uv run python examples/06_workflows.py
 """
-from agentbuilder import PlanAgent, ReflectionAgent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import PlanAgent, ReflectionAgent
+from agentmaker.testing import ScriptedLLM
 
 # Reflection: draft -> critique -> refine, looping until the critic replies "GOOD ENOUGH"
 # (the default English pass signal; the Chinese pack uses a Chinese one).

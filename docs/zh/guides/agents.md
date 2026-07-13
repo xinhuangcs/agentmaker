@@ -1,6 +1,6 @@
 # Agent 与工作流
 
-一个 Agent（智能体：接收输入、按需调用工具、返回回复的执行单元）接收一份输入，按需在循环中调用工具（tool），最后返回一段回复。agentbuilder 为此提供了一个统一的执行原语（`Agent`）、两种工作流范式（`PlanAgent`、`ReflectionAgent`），以及一种声明式描述它们中任意一个的方式（`AgentSpec` + `build_agent`）。每一种 Agent 策略都返回同一种结果封装 `RunResult`。另有一个独立的适配器 `AgentTool`，把一个 Agent 当作工具交给另一个 Agent 使用；正因为它本身是一个工具，它返回给编排方（orchestrator，即发起委派的上层 Agent）的是 `ToolResponse`，而不是 `RunResult`。
+一个 Agent（智能体：接收输入、按需调用工具、返回回复的执行单元）接收一份输入，按需在循环中调用工具（tool），最后返回一段回复。agentmaker 为此提供了一个统一的执行原语（`Agent`）、两种工作流范式（`PlanAgent`、`ReflectionAgent`），以及一种声明式描述它们中任意一个的方式（`AgentSpec` + `build_agent`）。每一种 Agent 策略都返回同一种结果封装 `RunResult`。另有一个独立的适配器 `AgentTool`，把一个 Agent 当作工具交给另一个 Agent 使用；正因为它本身是一个工具，它返回给编排方（orchestrator，即发起委派的上层 Agent）的是 `ToolResponse`，而不是 `RunResult`。
 
 ## 统一循环
 
@@ -9,8 +9,8 @@
 这一个循环同时覆盖了「chat」和「react」两种用法。ReAct（reason then act，即「先推理再行动」：模型在每次调用工具前先写出自己的推理）不过是同一个循环的一个预设，后文在[声明式构建](#声明式构建)一节展开。
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -35,7 +35,7 @@ result = agent.run("What's the weather in Copenhagen?")
 print(result.final_output)
 ```
 
-`ScriptedLLM` 是 `agentbuilder.testing` 提供的测试替身（test double：测试时用来顶替真实依赖的假对象）：它按预先给定的固定回复列表逐条回放，因此运行 Agent 代码时无需 API key、也无需联网。把它换成 `LLMClient("deepseek")`（或 `"openai"` / `"anthropic"` / `"gemini"`）即可接入真实模型，届时由模型自行决定何时调用工具。参见 [LLM 客户端](llm-clients.md)。
+`ScriptedLLM` 是 `agentmaker.testing` 提供的测试替身（test double：测试时用来顶替真实依赖的假对象）：它按预先给定的固定回复列表逐条回放，因此运行 Agent 代码时无需 API key、也无需联网。把它换成 `LLMClient("deepseek")`（或 `"openai"` / `"anthropic"` / `"gemini"`）即可接入真实模型，届时由模型自行决定何时调用工具。参见 [LLM 客户端](llm-clients.md)。
 
 ### 构造一个 Agent
 
@@ -50,28 +50,30 @@ print(result.final_output)
 
 `Agent` 会自动保存多轮历史，并按 `scope`（作用域）相互隔离，因此单个实例可以服务于多个会话。挂上一个 `session_store` 即可让历史在重启后依然保留。关于 scope 如何为会话建立键值区分，参见[作用域与异步](scope-and-async.md)；关于如何构建工具与注册表，参见[工具](tools.md)。
 
-还有更多可选参数（`confirm`、`permissions`、`checkpoint_store`、`context_builder`、`tool_retriever`、护栏（guardrail）、钩子（hook）等等）用于接入各类横切能力，它们各有专门的指南：[护栏与 HITL](guardrails-and-hitl.md)、[上下文工程](context-engineering.md)、[记忆](memory.md)、[可观测性](observability.md)。
+还有更多可选参数（`confirm`、`permissions`、`checkpoint_store`、`context_builder`、`tool_retriever`、护栏（guardrail）、钩子（hook）等等）用于接入各类横切能力，它们各有专门的指南：[护栏与人在回路](guardrails-and-hitl.md)、[上下文工程](context-engineering.md)、[记忆](memory.md)、[可观测性](observability.md)。
 
 ### 结构化输出
 
-向 `run` / `arun` 传入 `output_schema`（一个 Pydantic 模型）后，Agent 便返回一个经过校验的实例，而非纯文本。该实例最终落在 `RunResult.final_output` 中。这一过程不使用工具。完整用法参见[结构化输出](structured-output.md)。
+向 `run` / `arun` 传入 `output_schema`（一个 Pydantic 模型）后，返回的 `RunResult.final_output` 保存经过校验的实例，而非纯文本。这一过程不使用工具。完整用法参见[结构化输出](structured-output.md)。
 
 ### 流式输出
 
-`Agent.stream_run(input_text, ...)` 会逐片产出回复（其异步对应版本是 `astream_run`，用 `async for` 迭代）。当 Agent 配有工具时，流式循环会走完全相同的轮次结构，并在每一轮的文本到达时随之流式输出。
+`Agent.stream_run(input_text, ...)` 会逐片产出回复（其异步对应版本是 `astream_run`，用 `async for` 迭代）。当 Agent 配有工具且模型适配器原生支持流式工具调用时，流式循环会走完全相同的轮次结构，并在每一轮的文本到达时随之流式输出。文本工具模拟不支持流式工具循环：使用 `LLMClient(..., emulate_tools=True)` 的 Agent 在这种组合下会抛出 `LLMConfigError`，请改用 `run` / `arun`。
+
+默认情况下，文本片段会立即产出，输出护栏在流结束后检查。设 `buffer_output=True` 可先缓冲完整输出，只有通过护栏后才向调用方产出。
 
 !!! note
-    流式循环不支持 human-in-the-loop（HITL，人在回路：让人在关键处介入审批）的挂起/恢复，也不支持检查点（checkpoint）。需要确认的工具会退回到它的同步确认回调。当你需要挂起语义时，请改用 `run` / `arun`（参见[返回类型](#返回类型)与[护栏与 HITL](guardrails-and-hitl.md)）。
+    流式循环不支持 human-in-the-loop（HITL，人在回路：让人在关键处介入审批）的挂起/恢复，也不支持检查点（checkpoint）。需要确认的工具会退回到它的同步确认回调。当你需要挂起语义时，请改用 `run` / `arun`（参见[返回类型](#返回类型)与[护栏与人在回路](guardrails-and-hitl.md)）。
 
 ## 工作流范式
 
 `Agent` 让模型自行决定下一步做什么，而工作流范式则在代码里把各阶段的先后顺序固定下来。两者底层都构建在同一个单循环 `Agent` 之上，因此接收相同的 LLM 和相同的工具。
 
-下面的示例是自足封闭的（hermetic：不依赖网络或外部服务、可独立运行，`ScriptedLLM` 顶替了真实模型本会生成的内容），开箱即可运行：
+下面的示例是自洽的（hermetic：不依赖网络或外部服务、可独立运行，`ScriptedLLM` 顶替了真实模型本会生成的内容），开箱即可运行：
 
 ```python
-from agentbuilder import PlanAgent, ReflectionAgent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import PlanAgent, ReflectionAgent
+from agentmaker.testing import ScriptedLLM
 
 # Reflection: draft -> critique -> refine, looping until the critic replies "GOOD ENOUGH"
 # (the default English pass signal; the Chinese pack uses a Chinese one).
@@ -116,14 +118,14 @@ ReflectionAgent(name, llm, system_prompt=None, *, max_turns=3, tool_registry=Non
 !!! note
     与 `Agent` 不同，`PlanAgent` 和 `ReflectionAgent` 只接受 `tool_registry`（仅限关键字参数），不提供 `tools` 列表这一便捷形式。请先构建一个注册表（参见[工具](tools.md)）再传入。
 
-当某个步骤或批评环节调用了高风险工具、且挂有 `checkpoint_store` 时，该内部运行会挂起以等待审批，中断会沿着范式向上传播；恢复时从该处继续。参见[护栏与 HITL](guardrails-and-hitl.md)。
+当某个步骤或批评环节调用了高风险工具、且挂有 `checkpoint_store` 时，该内部运行会挂起以等待审批，中断会沿着范式向上传播；恢复时从该处继续。参见[护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 声明式构建
 
 除了直接调用构造函数，你还可以用 `AgentSpec`（一个纯配置 dataclass）来描述一个 Agent，再用 `build_agent` 把它构建出来。两种形式并存；声明式只是叠在命令式构造函数之上的一层便捷封装。
 
 ```python
-from agentbuilder import AgentSpec, tool
+from agentmaker import AgentSpec, tool
 
 
 @tool
@@ -138,7 +140,7 @@ print(f"spec: name={spec.name!r} strategy={spec.strategy!r} "
       f"model={spec.model!r} tools={[t.name for t in spec.tools]}")
 
 # To build and run it (needs the provider's API key in your environment):
-#     from agentbuilder import build_agent
+#     from agentmaker import build_agent
 #     agent = build_agent(spec)              # resolves model="deepseek" to a real LLMClient
 #     print(agent.run("what time is it?").final_output)
 print("build with: agent = build_agent(spec)  # needs DEEPSEEK_API_KEY to run")
@@ -153,7 +155,7 @@ print("build with: agent = build_agent(spec)  # needs DEEPSEEK_API_KEY to run")
 
 关键字段：
 
-- `model`：一个 `"provider:model"` 字符串（例如 `"deepseek:deepseek-v4-flash"`）、一个裸的 provider 名称（如 `"deepseek"`，使用该 provider 的默认模型）、一个 `LLMClient` 实例，或 `None`（使用默认客户端）。
+- `model`：一个 `"provider:model"` 字符串（例如 `"deepseek:deepseek-v4-flash"`）、一个裸的 provider 名称（如 `"deepseek"`，使用该 provider 的默认模型）、一个 `LLMClient` 实例、一个暴露 chat/stream 的鸭子类型客户端（如 `ScriptedLLM`，因而声明式构造出的 Agent 也能自洽测试），或 `None`（使用默认客户端）。
 - `instructions`：会成为该 Agent 的 `system_prompt`。
 - `tools`：一个 `list[Tool]` 或一个 `ToolRegistry`。
 - `max_turns`：一个统一的轮次上限，会被映射到各策略各自的上限；`None` 则采用该策略的默认值。
@@ -165,8 +167,8 @@ print("build with: agent = build_agent(spec)  # needs DEEPSEEK_API_KEY to run")
 orchestrator-worker（协调者-工作者）模式让一个主 Agent 把子任务委派给各领域的专家 Agent，同时始终掌控整段对话。`AgentTool` 通过把一个 Agent 适配成 `Tool` 来实现这一模式，于是主 Agent 委派子任务的方式与调用任何其他工具别无二致。子 Agent 携带自己独立的历史和工具，因此其上下文保持隔离。
 
 ```python
-from agentbuilder import Agent, AgentTool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, AgentTool
+from agentmaker.testing import ScriptedLLM
 
 # The worker: a specialist sub-agent.
 translator = Agent("translator", ScriptedLLM(["Bonjour le monde"]))
@@ -182,8 +184,10 @@ print(coordinator.run("How do you say 'hello world' in French?").final_output)
 
 `AgentTool(agent, *, name=None, description=None, scope=None, prompts=None)` 可包装任意 Agent。`name` 默认取 `agent.name`；`description` 告诉负责协调的模型这个子 Agent 擅长什么、何时该把任务委派给它。该工具只暴露一个 `task` 字符串参数，即交给子 Agent 的那份自足完整的子任务。
 
+默认 `scope=None` 时，委派会继承父 run 的当前 scope，因此一个 `AgentTool` 实例可以服务多个父会话，而不会混淆子 Agent 的历史。只有需要把子 Agent 固定到某个归属时才显式传 `scope`。并行分支仍应使用不同的子 Agent 实例，因为一个 Agent 对象只有一套可变的执行与历史表面。
+
 !!! note
-    通过 `AgentTool` 调用的子 Agent，无法在委派中途挂起以等待人工审批。如果它触及某个高风险动作，本次委派会返回一个错误结果，告知协调者：该子任务需要人工审批、无法以这种方式完成，从而让协调者改走别的路径。请把高风险动作留在主流程里，或改用 `PlanAgent`，它确实会向上传播嵌套的挂起。参见[护栏与 HITL](guardrails-and-hitl.md)。
+    通过 `AgentTool` 调用的子 Agent，无法在委派中途挂起以等待人工审批。如果它触及某个高风险动作，本次委派会返回一个错误结果，告知协调者：该子任务需要人工审批、无法以这种方式完成，从而让协调者改走别的路径。请把高风险动作留在主流程里，或改用 `PlanAgent`，它确实会向上传播嵌套的挂起。参见[护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 返回类型
 
@@ -210,4 +214,4 @@ else:
 
 `RunUsage` 是一份冻结快照，用于成本核算与额度可观测，含三个字段：`llm_calls`、`tool_calls`、`total_tokens`（均为整次运行的累计值）。
 
-关于 `Interrupt` 对象，以及用于继续一次挂起运行的 `resume(decision)` 流程，参见[护栏与 HITL](guardrails-and-hitl.md)。
+关于 `Interrupt` 对象，以及用于继续一次挂起运行的 `resume(decision)` 流程，参见[护栏与人在回路](guardrails-and-hitl.md)。

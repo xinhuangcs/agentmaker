@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0      # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990    # v8.3.2
+        with:
+          enable-cache: false              # no cache on the release path (avoid cache poisoning)
+      - run: uv sync --locked
+      - run: uv run --locked pytest
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/project/agentmaker/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0      # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0                   # full history: the ancestry check below is unreliable on a shallow clone
+      - name: Refuse tags that are not on main history
+        run: |
+          git fetch --no-tags origin main
+          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
+          git merge-base --is-ancestor "$commit" origin/main \
+            || { echo "tag commit $commit is not an ancestor of origin/main"; exit 1; }
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990    # v8.3.2
+        with:
+          enable-cache: false              # no cache on the release path (avoid cache poisoning)
+      - run: uv build
+      - run: ls dist/agentmaker-${GITHUB_REF_NAME#v}-*.whl   # fail if the git tag doesn't match the built version
+      - run: uvx twine check dist/*
+      - name: Smoke-install the built wheel in a clean venv
+        run: |
+          uv venv /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/python -c "import agentmaker; from agentmaker.testing import ScriptedLLM; print('import ok')"
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b   # v1.14.0

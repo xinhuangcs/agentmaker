@@ -7,8 +7,8 @@ in your environment; then the model itself decides when to call the tool.
 
     uv run python examples/01_quickstart.py
 """
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool

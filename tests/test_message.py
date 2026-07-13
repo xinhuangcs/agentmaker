@@ -1,10 +1,10 @@
-"""Message type regression (hermetic): runtime role validation (Literal only guards statically), default timestamp is tz-aware UTC, and to_dict shape."""
+"""Message runtime validation, UTC timestamps, and serialization contracts."""
 
 from datetime import timezone
 
 import pytest
 
-from agentbuilder.core import Message
+from agentmaker.core import Message
 
 
 def test_valid_roles_accepted():
@@ -14,7 +14,7 @@ def test_valid_roles_accepted():
 
 def test_invalid_role_raises():
     with pytest.raises(ValueError):
-        Message("x", "useer")           # a misspelled role raises at runtime (silently passed before the fix)
+        Message("x", "useer")
 
 
 def test_default_timestamp_is_utc_aware():

@@ -1,15 +1,15 @@
 # 记忆（Memory）
 
-记忆（memory）让 agent 拥有可跨会话长期保留的事实：用户对什么过敏、住在哪里、喜欢怎样的咖啡。agentbuilder 内置两种互补的记忆类型。`Memory` 是语义记忆（semantic memory），你写入自由形式的事实，再按语义把它们召回。`KVMemory` 是键值记忆（key-value memory），你把结构化的事实写在一个确切的键（key）下，之后原样读回。当一个事实比较模糊、你希望取回最相关的若干条时（比如「我该避开什么食物」），用 `Memory`；当一个事实是确定且单值的（`location = Beijing`）时，用 `KVMemory`。
+记忆（memory）让 agent 拥有可跨会话长期保留的事实：用户对什么过敏、住在哪里、喜欢怎样的咖啡。agentmaker 内置两种互补的记忆类型。`Memory` 是语义记忆（semantic memory），你写入自由形式的事实，再按语义把它们召回。`KVMemory` 是键值记忆（key-value memory），你把结构化的事实写在一个确切的键（key）下，之后原样读回。当一个事实比较模糊、你希望取回最相关的若干条时（比如「我该避开什么食物」），用 `Memory`；当一个事实是确定且单值的（`location = Beijing`）时，用 `KVMemory`。
 
 ## 快速上手
 
-`Memory` 把一个作为唯一事实来源的存储（`MemoryStore`）与一个由 [检索与 RAG](retrieval-and-rag.md) 构建的检索索引配对起来。嵌入器（embedder）把文本转成向量，让意思相近的内容在向量空间里彼此靠近；下面的代码片段用的是 `FakeEmbedder`，它是一个确定性的离线替身，因此无需 API key、无需联网即可运行。以下内容与 [`examples/04_memory.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/04_memory.py) 完全一致：
+`Memory` 把一个作为唯一事实来源的存储（`MemoryStore`）与一个由 [检索与 RAG](retrieval-and-rag.md) 构建的检索索引配对起来。嵌入器（embedder）把文本转成向量，让意思相近的内容在向量空间里彼此靠近；下面的代码片段用的是 `FakeEmbedder`，它是一个确定性的离线替身，因此无需 API key、无需联网即可运行。以下内容与 [`examples/04_memory.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/04_memory.py) 完全一致：
 
 ```python
-from agentbuilder import Memory, MemoryStore
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(FakeEmbedder()), store=MemoryStore())
 
@@ -44,9 +44,9 @@ for hit in memory.search("what food should I avoid", top_k=2):
 这三个权重、半衰期，以及默认返回条数都放在 `MemoryConfig` 里，并有一组合理的基线默认值（所有权重均为 `1.0`，`recency_halflife_hours=72.0`，`search_top_k=5`）。在构造时传入一个 config 可做全局调优，或者在每次调用时以关键字参数的形式传给 `search` 做单次覆盖：
 
 ```python
-from agentbuilder import Memory, MemoryStore, MemoryConfig
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore, MemoryConfig
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 memory = Memory(
     retriever=build_sqlite_hybrid(FakeEmbedder()),
@@ -70,7 +70,7 @@ hits = memory.search("coffee", top_k=3, recency_weight=0.0)
 | 字段 | 含义 |
 | --- | --- |
 | `content` | 记忆的正文文本。 |
-| `id` | 唯一标识符，除非你自行设置，否则自动生成（一个 uuid）。 |
+| `id` | 在一份完整归属 scope 内的标识符；除非你自行设置，否则自动生成 uuid。 |
 | `type` | 一个自由形式的标签（默认为 `"semantic"`）；不做强制约束，纯粹供你自己分组。 |
 | `importance` | 0..1 之间的重要性（默认为 `0.5`）；参与 importance 得分并影响 `forget`。 |
 | `created_at` | 记忆被记录的时间。 |
@@ -79,6 +79,8 @@ hits = memory.search("coffee", top_k=3, recency_weight=0.0)
 | `invalid_at` | 软失效时间；`None` 表示有效。 |
 | `superseded_by` | 取代了这条记忆的那条更新记忆的 id。 |
 | `metadata` | 一个附带的字典，默认为空。 |
+
+同一个显式 id 可以存在于不同的 sibling scope 中。`MemoryStore.get` 和 `MemoryStore.replace` 是点访问操作：如果 `Scope(base="memory", user="alice")` 这类较粗的 scope 在不同 agent 或 session 维度下命中多条同 id 记录，它们会抛出 `RetrievalError`，而不是任意挑选一个 sibling。请传入收窄到单一归属 footprint 的 scope。search 和 `all` 等集合操作仍采用常规的「只过滤非空维度」语义。
 
 你可以在写入时控制 `type`、`importance` 和 `metadata`：
 
@@ -100,8 +102,8 @@ memory.add("Ships to production on Fridays", type="procedural", importance=0.9,
 
 ```python
 import asyncio
-from agentbuilder import Memory, MemoryStore, SmartWriter, LLMClient
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker import Memory, MemoryStore, SmartWriter, LLMClient
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(OpenAIEmbedder()), store=MemoryStore())
 writer = SmartWriter(memory, LLMClient("deepseek"))
@@ -120,8 +122,8 @@ for r in records:
 除了 `add` 和 `search`，`Memory` 还暴露了完整的生命周期：
 
 - `update(id, content)` 在单个原子事务里替换一条记忆的正文，并把它的新近度重新计到编辑时间。
-- `invalidate(id, superseded_by=...)` 对一条记忆做软失效：它离开索引、不再被召回，但记录会保留下来供审计。这正是 `SmartWriter` 所用的方式。
-- `delete(id)` / `delete_many(ids)` 从存储和索引中物理移除记忆（用于合规性擦除）。
+- `invalidate(id, superseded_by=...)` 对一条记忆做软失效：正本记录会标为失效并请求清理索引；即使残留陈旧索引行，召回也会排除它。记录本身保留下来供审计。这正是 `SmartWriter` 所用的方式。
+- `delete(id)` / `delete_many(ids)` 从权威存储中物理移除记忆，并请求清理派生索引。索引清理是 best-effort，可能还需执行 `rebuild_index()` / 对账，因此仅调用这个 API 不保证立即从所有后端完成物理擦除。
 - `forget(strategy=...)` 批量修剪并返回被删除的 id。策略有：`"importance"`（丢弃低于 `threshold` 的条目）、`"age"`（丢弃早于 `max_age_days` 的条目），以及 `"capacity"`（只保留最重要且最新的前 N 条）。
 - `stats()` 返回 `{"total": ..., "by_type": {...}}`，是纯计数，不调用 LLM。
 
@@ -143,7 +145,7 @@ result = await memory.consolidate()   # {"before": 12, "after": 8}
 对于确定且单值的事实，用语义召回既大材小用又不够精确。`KVMemory` 每个键只存一个值，并原样读回，不做任何猜测。`KVStore` 是底层的 SQLite 表（值为字符串）；`KVMemory` 是它之上的一层门面（facade），负责 JSON 编码和解码，因此值可以是字符串、数字、列表或字典。它带有一个固定的 [scope](retrieval-and-rag.md)（作用域）用于归属：
 
 ```python
-from agentbuilder import KVStore, KVMemory, Scope
+from agentmaker import KVStore, KVMemory, Scope
 
 kv = KVMemory(KVStore(), scope=Scope(base="kv", user="alice"))
 
@@ -162,8 +164,8 @@ print(kv.as_dict())              # {"location": "Beijing", "allergies": ["peanut
 `MemoryTool` 把一个 `Memory`（可选地带上一个 `SmartWriter`）包装成一个 [工具](tools.md)，这样 agent 就能在对话中途自行决定去记住和召回。像注册其它任何工具一样注册它：
 
 ```python
-from agentbuilder import Agent, Memory, MemoryStore, MemoryTool, LLMClient
-from agentbuilder.retrieval import build_sqlite_hybrid, OpenAIEmbedder
+from agentmaker import Agent, Memory, MemoryStore, MemoryTool, LLMClient
+from agentmaker.retrieval import build_sqlite_hybrid, OpenAIEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(OpenAIEmbedder()), store=MemoryStore())
 agent = Agent("assistant", LLMClient("deepseek"), tools=[MemoryTool(memory)])
@@ -171,7 +173,9 @@ agent = Agent("assistant", LLMClient("deepseek"), tools=[MemoryTool(memory)])
 
 这个工具接收一个 `action` 加上一个 `content` 或 `query`，并分派到：`remember`、`recall`、`summary`、`stats`、`forget` 和 `consolidate`。传入一个 `writer=` 可让 `remember` 走 `SmartWriter`，从而自动去重和重写，而不是走一次普通的 `add`。
 
-由于某些动作会修改或删除已存的数据，`MemoryTool` 会把它们挡在人工确认之后：`forget` 和 `consolidate` 始终需要确认，`remember` 在挂了 writer 时也需要（因为 `SmartWriter` 可能会更新或删除已有记忆）。读取动作（`recall`、`summary`、`stats`）以及一次普通的 add 会直接放行。这道由 writer 触发的确认默认开启；传入 `MemoryTool(memory, writer, confirm_writer_edits=False)` 即可关闭它。确认关卡是如何接线的，见 [护栏与 HITL](guardrails-and-hitl.md)（人在回路）。
+由于某些动作会修改或删除已存的数据，`MemoryTool` 会把它们挡在人工确认之后：`forget` 和 `consolidate` 始终需要确认，`remember` 在挂了 writer 时也需要（因为 `SmartWriter` 可能会更新或删除已有记忆）。读取动作（`recall`、`summary`、`stats`）以及一次普通的 add 会直接放行。这道由 writer 触发的确认默认开启；传入 `MemoryTool(memory, writer, confirm_writer_edits=False)` 即可关闭它。确认关卡是如何接线的，见 [护栏与人在回路](guardrails-and-hitl.md)（人在回路）。
+
+工具默认使用 Memory 的固定 scope。单个 Agent 实例服务多个租户时，使用 `MemoryTool(memory, scope_policy="merge_run")`：它从当前运行中填充固定 scope 为空的 `user`、`agent`、`app`，并拒绝冲突；是否继承 session 需通过 `inherit_dimensions` 显式选择。`recall` 和 `summary` 的结果在返回模型前会标记为外部内容；这种定界式提示注入防护只能降低风险，并不是安全沙箱。
 
 ## 持久化与隔离
 
@@ -186,10 +190,14 @@ memory = Memory(
 
 `MemoryStore` 是权威的唯一事实来源：它保存完整的 `MemoryItem` 记录，而检索索引只是一个可重建的派生物。如果索引丢失，或者你更换了后端，`rebuild_index()` 会把每一条已存记忆重新嵌入回索引。
 
+`Memory.from_config()` 组装的资源由该 `Memory` 持有，`close()` 或上下文管理器会释放它们。直接构造时传入的对象仍由调用方持有，因此 retriever 可以安全地与 RAG 或其它管理器共享。
+
+`summary(top_k=N)` 会让有查询和无查询的摘要都最多使用 `N` 条记忆，避免存储增长后生成无界 prompt。
+
 要做多用户隔离，就给每个用户各自的 scope。在构造时传入 `scope=`，让每一次写入和读取都留在那个所有者的数据范围内，并且每个用户保持一个 `Memory`（和一个 `SmartWriter`）：
 
 ```python
-from agentbuilder import Scope
+from agentmaker import Scope
 
 alice = Scope(base="memory", user="alice")
 memory = Memory(retriever=..., store=..., scope=alice)

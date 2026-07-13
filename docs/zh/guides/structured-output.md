@@ -9,8 +9,8 @@
 ```python
 from pydantic import BaseModel
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 class Person(BaseModel):
@@ -25,12 +25,12 @@ person = agent.run("Extract the person from: Ada is 36.", output_schema=Person).
 print(f"{type(person).__name__}(name={person.name!r}, age={person.age})")
 ```
 
-这段是 [`examples/03_structured_output.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/03_structured_output.py) 的逐字拷贝。它无需 API key、无需联网即可运行：`ScriptedLLM` 是框架的测试替身（一个替代品，回放事先准备好的回复，而不去调用真实模型），这里它直接返回那个 JSON 对象，框架把它解析并校验成一个 `Person`。`person` 是一个真正的 `Person` 实例，所以 `person.name` 和 `person.age` 是带类型的属性，而不是字典取值。
+这段是 [`examples/03_structured_output.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/03_structured_output.py) 的逐字拷贝。它无需 API key、无需联网即可运行：`ScriptedLLM` 是框架的测试替身（一个替代品，回放事先准备好的回复，而不去调用真实模型），这里它直接返回那个 JSON 对象，框架把它解析并校验成一个 `Person`。`person` 是一个真正的 `Person` 实例，所以 `person.name` 和 `person.age` 是带类型的属性，而不是字典取值。
 
 想对接真实模型，只要把测试替身换成真实客户端，其余一切保持不变：
 
 ```python
-from agentbuilder import LLMClient
+from agentmaker import LLMClient
 
 agent = Agent("extractor", LLMClient("deepseek"))
 person = agent.run("Extract the person from: Ada is 36.", output_schema=Person).final_output
@@ -73,7 +73,7 @@ person = result.final_output
 send_to_database(person.name, person.age)
 ```
 
-护栏（guardrail）与对话历史在结构化通路上依然生效。当框架需要输出的文本形式时（用来检查输出护栏，或把这一轮持久化进历史），它会用 `model_dump_json()` 序列化模型，所以落进历史的是你对象的 JSON 形式。输出护栏见 [护栏与 HITL](guardrails-and-hitl.md)。
+护栏（guardrail）与对话历史在结构化通路上依然生效。当框架需要输出的文本形式时（用来检查输出护栏，或把这一轮持久化进历史），它会用 `model_dump_json()` 序列化模型，所以落进历史的是你对象的 JSON 形式。输出护栏见 [护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 调整重试
 
@@ -94,7 +94,7 @@ person = agent.run(
 如果模型在重试预算内无法产出一个有效对象，框架会抛出带有最后一次校验错误的 `LLMResponseError`。像处理任何其他模型调用失败那样处理它即可：
 
 ```python
-from agentbuilder import LLMResponseError
+from agentmaker import LLMResponseError
 
 try:
     person = agent.run("...", output_schema=Person).final_output

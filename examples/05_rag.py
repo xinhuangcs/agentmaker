@@ -6,9 +6,9 @@ query-rewrite model. In production use OpenAIEmbedder() and a real LLMClient.
 
     uv run python examples/05_rag.py
 """
-from agentbuilder import IngestionPipeline, RagRetriever, SourceStore
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder, ScriptedLLM
+from agentmaker import IngestionPipeline, RagRetriever, SourceStore
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder, ScriptedLLM
 
 retriever = build_sqlite_hybrid(FakeEmbedder())
 source_store = SourceStore()

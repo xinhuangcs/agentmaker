@@ -9,7 +9,7 @@ large skill library does not bloat every prompt. Hermetic (writes to a temp dire
 import tempfile
 from pathlib import Path
 
-from agentbuilder import SkillLoader
+from agentmaker import SkillLoader
 
 # Create a couple of skills on disk; each is a folder containing a SKILL.md.
 root = Path(tempfile.mkdtemp())

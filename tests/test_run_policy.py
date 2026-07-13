@@ -1,16 +1,15 @@
-"""RunPolicy run-governance regression (hermetic): the five limits + cooperative cancellation + __post_init__ validation + no-policy runs unaffected.
+"""RunPolicy limits, cooperative cancellation, validation, and unbounded runs."""
 
-Fills a coverage gap (previously only the max_llm_calls dimension was tested). A loop LLM that always requests a tool keeps the run cycling until RunPolicy halts it.
-"""
-
+import asyncio
 import time
 
 import pytest
 
-from agentbuilder import Agent, RunPolicy
-from agentbuilder.core.exceptions import RunCancelled, RunLimitExceeded
-from agentbuilder.core.llm_response import LLMResponse
-from agentbuilder.tools import Tool, ToolResponse
+from agentmaker import Agent, RunPolicy
+from agentmaker.core.exceptions import RunCancelled, RunLimitExceeded
+from agentmaker.core.llm_response import LLMResponse
+from agentmaker.runtime.execution.run_context import governed_chat
+from agentmaker.tools import Tool, ToolResponse
 
 
 class _LoopLLM:
@@ -79,6 +78,79 @@ def test_max_tool_calls_zero_readonly_mode():
     assert out.final_output == "直接答"
 
 
+def test_max_tool_calls_serializes_parallel_eligible_batch():
+    """An exact tool-call cap disables batching so concurrent admission cannot overshoot the limit."""
+    class ParallelTool(_NoopTool):
+        supports_parallel = True
+
+    class BatchLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        async def chat(self, messages, **kwargs):
+            return LLMResponse(tool_calls=[
+                {"id": "a", "type": "function", "function": {"name": "noop", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "noop", "arguments": "{}"}},
+            ])
+
+    tool = ParallelTool()
+    with pytest.raises(RunLimitExceeded, match="tool call limit"):
+        _agent(BatchLLM(), RunPolicy(max_tool_calls=1), tool).run("go")
+    assert tool.calls == 1
+
+
+def test_llm_limit_serializes_parallel_tools_with_governed_calls():
+    """Parallel tools cannot race past an exact LLM-call limit through governed_chat."""
+    class InnerLLM:
+        model = "inner"
+        provider = "test"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages, **kwargs):
+            self.calls += 1
+            await asyncio.sleep(0.02)
+            return LLMResponse(content="inner")
+
+    class GovernedTool(Tool):
+        supports_parallel = True
+
+        def __init__(self, llm):
+            super().__init__("governed", "governed")
+            self.llm = llm
+
+        def get_parameters(self):
+            return []
+
+        async def arun(self, parameters):
+            await governed_chat(self.llm, [{"role": "user", "content": "x"}])
+            return ToolResponse.ok("ok")
+
+    class BatchLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        async def chat(self, messages, **kwargs):
+            return LLMResponse(tool_calls=[
+                {"id": "a", "type": "function",
+                 "function": {"name": "governed", "arguments": "{}"}},
+                {"id": "b", "type": "function",
+                 "function": {"name": "governed", "arguments": "{}"}},
+            ])
+
+    inner = InnerLLM()
+    agent = Agent(
+        "t", BatchLLM(), tools=[GovernedTool(inner)],
+        run_policy=RunPolicy(max_llm_calls=2),
+    )
+    with pytest.raises(RunLimitExceeded, match="LLM call limit"):
+        agent.run("go")
+    assert inner.calls == 1
+
+
 def test_max_tokens():
     """Cumulative tokens (sum of each usage.total_tokens) over the limit raises RunLimitExceeded."""
     with pytest.raises(RunLimitExceeded, match="token limit"):
@@ -90,6 +162,55 @@ def test_deadline_seconds():
     slow = _NoopTool(sleep=0.08)
     with pytest.raises(RunLimitExceeded, match="wall-clock time limit"):
         _agent(_LoopLLM(), RunPolicy(deadline_seconds=0.04), slow).run("go")
+
+
+def test_deadline_checked_after_final_llm_before_commit():
+    """A final LLM response that arrives after the cooperative deadline is not committed as success."""
+    class SlowFinalLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        async def chat(self, messages, **kwargs):
+            await asyncio.sleep(0.04)
+            return LLMResponse(content="late")
+
+    agent = Agent("t", SlowFinalLLM(), run_policy=RunPolicy(deadline_seconds=0.01))
+    with pytest.raises(RunLimitExceeded, match="wall-clock time limit"):
+        agent.run("go")
+    assert agent.get_history() == []
+
+
+def test_deadline_rejection_at_commit_clears_completed_marker(tmp_path):
+    """A commit-boundary deadline rejection with a checkpoint store leaves no checkpoint or completed marker behind: the scope stays clean for a fresh run."""
+    from agentmaker.retrieval.scope import Scope
+    from agentmaker.runtime import SqliteCheckpointStore
+    from agentmaker.runtime.guardrails import CallableGuardrail
+
+    class QuickLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        async def chat(self, messages, **kwargs):
+            return LLMResponse(content="按时完成")
+
+    def slow_pass(text):
+        time.sleep(0.05)
+        return True
+
+    checkpoints = SqliteCheckpointStore(tmp_path / "cp.db")
+    scope = Scope(user="dl")
+    agent = Agent("t", QuickLLM(), checkpoint_store=checkpoints,
+                  output_guardrails=[CallableGuardrail(slow_pass)],
+                  run_policy=RunPolicy(deadline_seconds=0.02))
+    with pytest.raises(RunLimitExceeded, match="wall-clock time limit"):
+        agent.run("go", scope=scope)
+
+    assert checkpoints.load(scope=scope) is None       # no poisoned completed marker left behind
+    relaxed = Agent("t", QuickLLM(), checkpoint_store=checkpoints,
+                    output_guardrails=[CallableGuardrail(slow_pass)])
+    assert relaxed.run("再来", scope=scope).final_output == "按时完成"
 
 
 def test_cancel_hook():

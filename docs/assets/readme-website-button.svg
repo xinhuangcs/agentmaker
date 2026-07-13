@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="42" viewBox="0 0 150 42" role="img" aria-labelledby="title">
+  <title id="title">Visit the agentmaker website</title>
+  <rect x="0.5" y="0.5" width="149" height="41" rx="8" fill="#eaeef2" stroke="#afb8c1"/>
+  <g transform="translate(8 8)">
+    <rect width="26" height="26" rx="6" fill="#6ea8ff"/>
+    <g transform="translate(1.9 2.1) scale(.222)" fill="#0b0c0e">
+      <path d="M50 14 61.8 36.4H38.2Z"/>
+      <path d="M32.3 45.9H41.8L27.6 84.8H15.8Z"/>
+      <path d="M67.7 45.9H58.3L71.2 84.8H84.2Z"/>
+      <rect x="35" y="60" width="30" height="12"/>
+    </g>
+  </g>
+  <text x="44" y="26.3" fill="#1f2328" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="15" font-weight="600">Website</text>
+  <path d="m128 16 5 5-5 5m5-5h-10" fill="none" stroke="#57606a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

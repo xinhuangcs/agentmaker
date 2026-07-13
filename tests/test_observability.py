@@ -1,16 +1,16 @@
-"""Observability regression (hermetic: local only, no key / no network).
+"""Hermetic observability tests with no keys or network access.
 
 Locks down the trace event contract (the events constants as the single source of truth),
 SqliteExporter's dedicated run_id column and old-DB column backfill, and OTelExporter's
-real-duration spans grouped into one trace by run_id.
+real-duration spans with optional upstream trace attachment.
 """
 
 import sqlite3
 
 import pytest
 
-from agentbuilder.core import trace_events as ev
-from agentbuilder.runtime.observability.exporters import OTelExporter, SqliteExporter
+from agentmaker.core import trace_events as ev
+from agentmaker.runtime.observability.exporters import OTelExporter, SqliteExporter
 
 
 # ---------- event type contract (single source of truth) ----------
@@ -19,8 +19,9 @@ def test_event_constants_are_single_source():
     """ALL_EVENT_TYPES holds exactly every EVENT_* constant with unique values; producers all reference them (no scattered literals)."""
     consts = {v for k, v in vars(ev).items() if k.startswith("EVENT_")}
     assert consts == set(ev.ALL_EVENT_TYPES)                # constant set == registry (forgetting to register a new event fails here)
-    assert len(consts) == len(ev.ALL_EVENT_TYPES) == 12     # no duplicate values
-    assert ev.EVENT_LLM_CALL == "llm_call" and ev.EVENT_INDEX_SYNC_RECONCILE == "index_sync_reconcile"
+    assert len(consts) == len(ev.ALL_EVENT_TYPES) == 13     # no duplicate values
+    assert ev.EVENT_LLM_CALL == "llm_call" and ev.EVENT_RUN_ERROR == "run_error"
+    assert ev.EVENT_INDEX_SYNC_RECONCILE == "index_sync_reconcile"
 
 
 # ---------- SqliteExporter: dedicated run_id column + old-DB backfill ----------
@@ -36,11 +37,11 @@ def test_sqlite_exporter_run_id_column_queryable():
     sx.close()
 
 
-def test_sqlite_exporter_old_table_gets_run_id_column(tmp_path):
-    """An old traces DB (no run_id column) auto-backfills the column on open (trace is derived data, so adding a column is safe), without error."""
-    p = str(tmp_path / "old_traces.db")
+def test_sqlite_exporter_adds_missing_run_id_column(tmp_path):
+    """A traces table without run_id receives the safe additive column on open."""
+    p = str(tmp_path / "traces.db")
     c = sqlite3.connect(p)
-    c.execute("CREATE TABLE traces(type TEXT, event TEXT, created_at TEXT)")   # old schema
+    c.execute("CREATE TABLE traces(type TEXT, event TEXT, created_at TEXT)")
     c.commit()
     c.close()
     sx = SqliteExporter(p)                                  # doesn't raise: ensure_columns backfills the run_id column
@@ -50,7 +51,7 @@ def test_sqlite_exporter_old_table_gets_run_id_column(tmp_path):
     sx.close()
 
 
-# ---------- OTelExporter: real duration + grouped into one trace per run ----------
+# ---------- OTelExporter: real duration + optional upstream trace attachment ----------
 
 def _otel_mem():
     """A fresh InMemorySpanExporter attached to the process-level TracerProvider (one per test, collecting only spans emitted after it attaches).
@@ -88,7 +89,7 @@ def test_otel_exporter_self_roots_by_default():
     assert spans[0].context.trace_id != int(run_id, 16)
     # run_id remains a span attribute so a backend can aggregate on it
     assert spans[0].attributes["run_id"] == run_id
-    # real duration: latency_ms=100 -> span ~100ms wide (previously a zero-width point)
+    # latency_ms=100 produces a span about 100 ms wide.
     dur_ms = (spans[0].end_time - spans[0].start_time) / 1e6
     assert 90 <= dur_ms <= 110
 

@@ -5,7 +5,7 @@
 当你需要直接、原始地访问模型时，就用 `LLMClient`。而当你构建一个 [Agent](agents.md) 时，通常是把一个 `LLMClient` 交给它（或让 `AgentSpec` 从一个 `"provider:model"` 字符串来构造），你自己不会去调用 `chat()`。
 
 ```python
-from agentbuilder import LLMClient
+from agentmaker import LLMClient
 
 llm = LLMClient("deepseek")                       # provider's default model (deepseek-v4-flash)
 resp = await llm.chat([{"role": "user", "content": "Hello"}])
@@ -13,7 +13,7 @@ print(resp.content)
 ```
 
 !!! note
-    `chat()` 和 `stream()` 都是协程（coroutine）：框架从内核起就是异步的。请在事件循环里用 `await` 运行它们，或者通过 `agentbuilder.core.aio` 里的门面（facade）从同步代码调用（`run_sync(llm.chat(...))` / `iter_sync(llm.stream(...))`）。
+    `chat()` 和 `stream()` 都是协程（coroutine）：框架从内核起就是异步的。请在事件循环里用 `await` 运行它们，或者通过 `agentmaker.core.aio` 里的门面（facade）从同步代码调用（`run_sync(llm.chat(...))` / `iter_sync(llm.stream(...))`）。
 
 ## 选择厂商与模型
 
@@ -78,7 +78,29 @@ LLMClient("openai_compatible", api_key="x", base_url="http://host/v1", model="my
 | `gemini` | `gemini-3.1-flash-lite` | `GEMINI_API_KEY`、`GOOGLE_API_KEY` | native |
 
 !!! note
-    模型名与端点属于厂商事实，会随着厂商发布新模型而变动。框架会定期对照官方文档核实它们；请把这张表当作发布时的默认值，而非永久保证。当你想用上某家厂商完整的原生特性集时，请使用 `gemini` / `anthropic`（原生协议）；`gemini_openai` 则是 Gemini 的 OpenAI 兼容垫片（shim）。
+    模型名与端点可能变化。请把这张表当作发布时的默认值，而非永久保证。当你想用上某家厂商完整的原生特性集时，请使用 `gemini` / `anthropic`（原生协议）；`gemini_openai` 则是 Gemini 的 OpenAI 兼容垫片（shim）。
+
+### 已登记模型的限制
+
+profile 中的限制只适用于该厂商的默认模型。显式传入另一个已登记的模型 ID 时，`LLMClient` 会解析该型号自己的上下文窗口与最大输出。相关的精确 token 限制如下：
+
+| 模型 ID | 上下文窗口 | 最大输出 |
+| --- | ---: | ---: |
+| `gpt-4.1-nano` | 1,047,576 | 32,768 |
+| `gpt-5.6`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`gpt-5.4` | 1,050,000 | 128,000 |
+| `gpt-5.4-mini`、`gpt-5.4-nano` | 400,000 | 128,000 |
+| `deepseek-v4-flash`、`deepseek-v4-pro` | 1,000,000 | 393,216 |
+| `gemini-3.1-flash-lite`、`gemini-3.5-flash` | 1,048,576 | 65,536 |
+| `glm-5.2` | 1,000,000 | 131,072 |
+| `glm-4.7-flash`、`glm-5.1`、`glm-5`、`glm-5-turbo`、`glm-4.7` | 204,800 | 131,072 |
+| `claude-fable-5`、`claude-opus-4-8`、`claude-sonnet-5`、`claude-sonnet-4-6` | 1,000,000 | 128,000 |
+| `qwen-flash`、`qwen3.6-flash` | 1,000,000 | 32,768 |
+| `qwen3.5-flash` | 1,000,000 | 65,536 |
+| `kimi-k2.7-code`、`kimi-k2.6`、`kimi-k2.5` | 262,144 | 未登记 |
+| `moonshot-v1-8k` | 8,192 | 8,192 |
+| `moonshot-v1-128k` | 131,072 | 未登记 |
+
+Moonshot 未公布独立的输出上限（单次调用最多输出「窗口减去输入」），因此注册表对 Kimi K2.x 与 `moonshot-v1-128k` 不设输出值，你传入的 `max_tokens` 按原样生效。DeepSeek 官方标注的「384K」输出展开为 393,216（二进制 K）。DashScope 仍以成本更低的 `qwen-flash` 为默认模型；需要 `qwen3.6-flash` 时应显式指定。
 
 ## 凭据与端点
 
@@ -113,6 +135,10 @@ print(resp.usage, resp.finish_reason)
 
 `temperature` 和 `max_tokens` 都是可选的。默认情况下客户端根本不发送 temperature，而是沿用模型服务端自身的默认值；当你需要确定性输出时，可按次调用传入 `temperature=`（或在构造器上设置 `default_temperature=`）。多余的关键字参数会原样透传给底层 SDK。
 
+### 客户端生命周期
+
+底层 SDK client 按 event loop 缓存。应用持有客户端时应使用 `async with LLMClient(...)`，或调用 `await llm.aclose()`。同步代码可结合 `with LLMClient(...)` 与 `run_sync` 使用；`close()` 会释放该线程的 SDK client。临时同步工作线程退出时，同步桥还会自动关闭已登记的 client、残留任务和 resident loop。
+
 ## 流式输出
 
 `stream()` 是一个异步生成器，会随着模型的产出逐块 yield 文本增量（delta）。用 `async for` 消费它。下面的示例完全 hermetic（自洽、无副作用：不需要 API key、不联网），用的是 `ScriptedLLM` 这个测试替身（test double），它复刻了真实客户端的 `chat()` / `stream()` 接口：
@@ -120,8 +146,8 @@ print(resp.usage, resp.finish_reason)
 ```python
 import asyncio
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 async def main():
@@ -146,9 +172,11 @@ async for piece in llm.stream([{"role": "user", "content": "Tell a joke"}]):
     print(piece, end="")
 ```
 
+不传工具时，每个产出片段都是字符串。通过 `tools=` 传入原生工具 schema 时，支持流式函数调用的适配器会先产出文本增量，最后再产出恰好一个终态 `LLMResponse`；其中汇总的 `tool_calls` 供 Agent 的流式工具循环使用。文本工具模拟不会在流式路径上模拟调用：`ToolEmulationAdapter` 只流式输出纯文本，配置了 `emulate_tools=True` 的 Agent 也会拒绝流式工具循环。模拟工具请使用非流式的 `chat` / `run` / `arun`。
+
 ### 流式统计
 
-一次流式调用只 yield 文本，所以每次调用的元数据（metadata）单独存放。在流耗尽之后，读取 `llm.last_stream_stats`（若你还没做过流式调用，则为 `None`）。它暴露 `model`、`finish_reason`、`usage` 和 `latency_ms`。对于 OpenAI 系列厂商，要拿到 token 用量，请求必须显式加入 `stream_options={"include_usage": True}`，否则 `usage` 可能为 `None`。
+每次调用的流式元数据（metadata）与产出的文本、可选的终态工具响应分开存放。在流耗尽之后，读取 `llm.last_stream_stats`（若你还没做过流式调用，则为 `None`）。它暴露 `model`、`finish_reason`、`usage` 和 `latency_ms`。对于 OpenAI 系列厂商，客户端会自动在流式请求中带上 `stream_options={"include_usage": True}`，所以 `usage` 通常有值；只有当后端本身不上报流式用量时才会是 `None`。
 
 ```python
 async for piece in llm.stream([{"role": "user", "content": "hi"}]):
@@ -167,7 +195,7 @@ async for piece in llm.stream(messages, on_stats=collected.append):
 
 ## `LLMResponse`
 
-每次非流式调用都返回一个 `LLMResponse` dataclass。字段如下：
+每次非流式调用都返回一个 `LLMResponse` dataclass；传入工具的流式调用也会在文本增量之后产出一个终态 `LLMResponse`。字段如下：
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -179,6 +207,7 @@ async for piece in llm.stream(messages, on_stats=collected.append):
 | `tool_calls` | `list \| None` | OpenAI 格式的函数调用工具调用（tool call），可直接回喂到 `messages`；没有时为 `None`。 |
 | `latency_ms` | `int` | 往返延迟，单位毫秒。 |
 | `raw` | `Any` | 厂商的原始响应对象。 |
+| `assistant_message` | `dict \| None` | 工具轮次所需、可 JSON 序列化的厂商续接状态；Agent 会自动回喂。 |
 
 ```python
 resp = await llm.chat([{"role": "user", "content": "hi"}])
@@ -202,8 +231,8 @@ print(resp)                  # same thing: __str__ returns content
 ```python
 from pydantic import BaseModel
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 class Person(BaseModel):
@@ -223,7 +252,7 @@ print(f"{type(person).__name__}(name={person.name!r}, age={person.age})")
 一条消息的 `content` 要么是纯字符串（常见情形），要么是一组厂商中立的内容片段（content part）列表。`Message` dataclass 用 `role`、`content`、`timestamp` 以及一个 `metadata` 字典来建模一条消息；调用 `to_dict()` 即可得到 `chat()` 和 `stream()` 所消费的 `{"role", "content"}` 形态。
 
 ```python
-from agentbuilder import Message
+from agentmaker import Message
 
 msg = Message(content="Hello", role="user")
 await llm.chat([msg.to_dict()])
@@ -237,7 +266,7 @@ await llm.chat([msg.to_dict()])
 - `image_part_from_url(url)` 引用一张由厂商去抓取的远程图像。
 
 ```python
-from agentbuilder import LLMClient, text_part, image_part_from_file
+from agentmaker import LLMClient, text_part, image_part_from_file
 
 llm = LLMClient("openai")
 messages = [{
@@ -261,7 +290,7 @@ resp = await llm.chat(messages)
 你不必修改框架就能新增一个厂商。传入一个 `ProviderProfile` 即可复用现有协议，无需改动源码：
 
 ```python
-from agentbuilder import LLMClient, ProviderProfile
+from agentmaker import LLMClient, ProviderProfile
 
 llm = LLMClient(
     provider="myvendor",
@@ -273,15 +302,15 @@ llm = LLMClient(
 若要接入一个全新的通信协议，请以某个协议名注册一个适配器类（`BaseAdapter` 的子类），然后在 profile 里引用该协议名：
 
 ```python
-from agentbuilder.core.adapters import register_adapter
+from agentmaker.core.adapters import register_adapter
 
 register_adapter("myproto", MyAdapter)   # MyAdapter is your BaseAdapter subclass
 LLMClient("myvendor", profile=ProviderProfile(protocol="myproto", default_model="m", key_envs=("MYVENDOR_API_KEY",)))
 ```
 
-对于缺少原生函数调用能力的模型，`LLMClient(..., emulate_tools=True)` 会用一层文本模拟垫片包住适配器，让使用工具的 agent 仍能工作。仅在原生函数调用不可用时才启用它，因为模拟方式可靠性较低、还会额外消耗 token。工具系统本身参见 [工具](tools.md)。
+对于缺少原生函数调用能力的模型，`LLMClient(..., emulate_tools=True)` 会用一层文本模拟垫片包住适配器，让使用工具的 Agent 通过非流式 `chat` / `run` / `arun` 工作；它不支持流式工具循环。仅在原生函数调用不可用时才启用它，因为模拟方式可靠性较低、还会额外消耗 token。工具系统本身参见 [工具](tools.md)。
 
-## 下一步去哪
+## 下一步去哪里
 
 - [Agent 与工作流](agents.md)：把一个 `LLMClient` 交给 `Agent`，或用 `AgentSpec` 加 `"provider:model"` 字符串以声明式方式配置它。
 - [工具](tools.md)：给模型可调用的函数；`LLMResponse` 上的 `tool_calls` 承载这些请求。

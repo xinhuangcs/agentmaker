@@ -1,14 +1,16 @@
-"""Storage versioning regression (hermetic: in-memory SQLite, no key / no network).
+"""Storage schema-contract tests (hermetic: in-memory SQLite, no key or network).
 
-Locks the "schema is a contract" open-time self-check primitives (agentbuilder/core/sqlite_util.py) and each store's behavior on top of them: a drifted legacy primary key / unique constraint fails loudly, safe additive columns auto-ALTER, a change to a virtual table's locked-in parameters raises, and a mismatched checkpoint version is discarded.
+Checks open-time schema validation, safe additive columns, locked virtual-table parameters, and
+checkpoint format rejection.
 """
 
+import importlib
 import sqlite3
 
 import pytest
 
-from agentbuilder.core.exceptions import RetrievalError, SessionError
-from agentbuilder.core.sqlite_util import (
+from agentmaker.core.exceptions import RetrievalError, SessionError
+from agentmaker.core.sqlite_util import (
     column_names, ensure_columns, primary_key_columns, require_ddl_contains,
     require_primary_key, require_unique_columns, table_ddl, unique_column_sets,
 )
@@ -16,6 +18,122 @@ from agentbuilder.core.sqlite_util import (
 
 def _db():
     return sqlite3.connect(":memory:")
+
+
+_INIT_CASES = [
+    ("agentmaker.memory.kv", "KVStore", "require_unique_columns", RetrievalError),
+    ("agentmaker.memory.store", "MemoryStore", "require_primary_key", RetrievalError),
+    ("agentmaker.runtime.sessions", "SqliteSessionStore", "require_columns", SessionError),
+    ("agentmaker.runtime.execution.checkpoint", "SqliteCheckpointStore", "require_columns", SessionError),
+]
+
+_SQLITE_INIT_CASES = [
+    *_INIT_CASES,
+    ("agentmaker.rag.source_store", "SourceStore", None, RetrievalError),
+    ("agentmaker.retrieval.index_sync", "SqliteBookkeeping", None, RetrievalError),
+]
+
+
+class _InitConnection:
+    def __init__(self, *, sqlite_failure=False):
+        self.closed = False
+        self.sqlite_failure = sqlite_failure
+
+    def execute(self, *args, **kwargs):
+        if self.sqlite_failure:
+            raise sqlite3.OperationalError("sqlite init failed")
+        return self
+
+    def commit(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.mark.parametrize("module_name,class_name,helper_name,error_type", _INIT_CASES)
+def test_store_init_closes_connection_when_schema_validation_fails(
+        monkeypatch, module_name, class_name, helper_name, error_type):
+    module = importlib.import_module(module_name)
+    connection = _InitConnection()
+
+    def fail_schema(*args, **kwargs):
+        raise error_type("schema failed")
+
+    monkeypatch.setattr(module, "open_sqlite", lambda *args, **kwargs: connection)
+    monkeypatch.setattr(module, helper_name, fail_schema)
+
+    with pytest.raises(error_type, match="schema failed"):
+        getattr(module, class_name)()
+
+    assert connection.closed is True
+
+
+@pytest.mark.parametrize("module_name,class_name,_helper_name,error_type", _SQLITE_INIT_CASES)
+def test_store_init_normalizes_sqlite_errors_and_closes_connection(
+        monkeypatch, module_name, class_name, _helper_name, error_type):
+    module = importlib.import_module(module_name)
+    connection = _InitConnection(sqlite_failure=True)
+    monkeypatch.setattr(module, "open_sqlite", lambda *args, **kwargs: connection)
+
+    with pytest.raises(error_type) as caught:
+        getattr(module, class_name)(*(() if class_name != "SqliteBookkeeping" else (":memory:",)))
+
+    assert isinstance(caught.value.__cause__, sqlite3.Error)
+    assert connection.closed is True
+
+
+def test_sqlite_bookkeeping_closes_connection_on_schema_helper_failure(monkeypatch):
+    module = importlib.import_module("agentmaker.retrieval.index_sync")
+    sqlite_util = importlib.import_module("agentmaker.core.sqlite_util")
+    connection = _InitConnection()
+    monkeypatch.setattr(module, "open_sqlite", lambda *args, **kwargs: connection)
+    monkeypatch.setattr(
+        sqlite_util, "primary_key_columns",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RetrievalError("schema failed")),
+    )
+
+    with pytest.raises(RetrievalError, match="schema failed"):
+        module.SqliteBookkeeping(":memory:")
+
+    assert connection.closed is True
+
+
+def test_open_sqlite_closes_connection_when_a_pragma_fails(monkeypatch):
+    from agentmaker.core.sqlite_util import open_sqlite
+
+    connection = _InitConnection(sqlite_failure=True)
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: connection)
+
+    with pytest.raises(sqlite3.OperationalError, match="sqlite init failed"):
+        open_sqlite("database.db")
+
+    assert connection.closed is True
+
+
+@pytest.mark.parametrize(
+    "class_name,args",
+    [("SqliteVecStore", (3,)), ("Fts5KeywordIndex", ())],
+)
+def test_sqlite_index_init_failure_closes_only_owned_connections(
+        monkeypatch, class_name, args):
+    module = importlib.import_module("agentmaker.retrieval.backends.sqlite")
+    cls = getattr(module, class_name)
+    monkeypatch.setattr(
+        cls, "_initialize",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RetrievalError("init failed")),
+    )
+
+    owned_connection = _InitConnection()
+    monkeypatch.setattr(module, "open_sqlite", lambda *args, **kwargs: owned_connection)
+    with pytest.raises(RetrievalError, match="init failed"):
+        cls(*args)
+    assert owned_connection.closed is True
+
+    shared_connection = _InitConnection()
+    with pytest.raises(RetrievalError, match="init failed"):
+        cls(*args, connection=shared_connection)
+    assert shared_connection.closed is False
 
 
 # ---------- introspection primitives ----------
@@ -50,14 +168,13 @@ def test_ensure_columns_adds_missing_only():
 # ---------- primary-key drift fails loud ----------
 
 def test_require_primary_key_pass_and_drift():
-    """Matching primary-key column set passes; drift (early single-column PK / missing scope dimension) raises with migration guidance."""
+    """A matching primary key passes while a scope-incomplete key raises with migration guidance."""
     c = _db()
     c.execute("CREATE TABLE memories(id TEXT, user TEXT, content TEXT, PRIMARY KEY(id, user))")
     require_primary_key(c, "memories", {"id", "user"}, error_cls=RetrievalError)   # match -> no raise
-    # legacy DB with an early single-column PK
-    c.execute("CREATE TABLE old(id TEXT PRIMARY KEY, user TEXT, content TEXT)")
+    c.execute("CREATE TABLE incompatible(id TEXT PRIMARY KEY, user TEXT, content TEXT)")
     with pytest.raises(RetrievalError) as e:
-        require_primary_key(c, "old", {"id", "user"}, error_cls=RetrievalError)
+        require_primary_key(c, "incompatible", {"id", "user"}, error_cls=RetrievalError)
     assert "across scopes" in str(e.value) and "user" in str(e.value)
 
 
@@ -68,10 +185,9 @@ def test_require_unique_columns_pass_and_drift():
     c = _db()
     c.execute("CREATE TABLE kv(user TEXT, key TEXT, value TEXT, UNIQUE(user, key))")
     require_unique_columns(c, "kv", {"user", "key"}, error_cls=SessionError)        # match -> no raise
-    # legacy DB's unique constraint misses the new dimension (only UNIQUE(key))
-    c.execute("CREATE TABLE kv_old(user TEXT, key TEXT, value TEXT, UNIQUE(key))")
+    c.execute("CREATE TABLE kv_incompatible(user TEXT, key TEXT, value TEXT, UNIQUE(key))")
     with pytest.raises(SessionError):
-        require_unique_columns(c, "kv_old", {"user", "key"}, error_cls=SessionError)
+        require_unique_columns(c, "kv_incompatible", {"user", "key"}, error_cls=SessionError)
 
 
 # ---------- virtual-table locked-in params: DDL fragment check ----------
@@ -89,10 +205,10 @@ def test_require_ddl_contains_virtual_params():
     require_ddl_contains(c, "absent", ["x"], error_cls=RetrievalError)              # nonexistent table -> skipped, no raise
 
 
-# ---------- per-store end to end: legacy drift -> loud error at open time ----------
+# ---------- per-store end to end: incompatible schemas fail at open time ----------
 
 def _seed(tmp_path, name, ddl):
-    """Seed a file DB with a legacy-schema table and return its path (for a store to hit at open time)."""
+    """Seed a file database with the supplied schema and return its path."""
     p = str(tmp_path / f"{name}.db")
     c = sqlite3.connect(p)
     c.execute(ddl)
@@ -101,9 +217,9 @@ def _seed(tmp_path, name, ddl):
     return p
 
 
-def test_memory_store_rejects_legacy_single_pk(tmp_path):
-    """MemoryStore hitting a legacy DB with an early single-column PK (no scope dimension) -> RetrievalError (no silent data mixing)."""
-    from agentbuilder.memory.store import MemoryStore
+def test_memory_store_rejects_incomplete_primary_key(tmp_path):
+    """MemoryStore rejects a primary key that omits ownership dimensions."""
+    from agentmaker.memory.store import MemoryStore
     p = _seed(tmp_path, "mem", "CREATE TABLE memories(id TEXT PRIMARY KEY, content TEXT)")
     with pytest.raises(RetrievalError):
         MemoryStore(p)
@@ -111,32 +227,32 @@ def test_memory_store_rejects_legacy_single_pk(tmp_path):
 
 
 def test_kv_store_rejects_drifted_unique(tmp_path):
-    """KVStore hitting a legacy DB whose UNIQUE lacks the scope dimension -> RetrievalError (cross-scope upsert would mix data)."""
-    from agentbuilder.memory.kv import KVStore
+    """KVStore rejects a UNIQUE constraint that omits ownership dimensions."""
+    from agentmaker.memory.kv import KVStore
     p = _seed(tmp_path, "kv", "CREATE TABLE kv(key TEXT, value TEXT, UNIQUE(key))")
     with pytest.raises(RetrievalError):
         KVStore(p)
 
 
 def test_session_store_rejects_missing_scope_column(tmp_path):
-    """SqliteSessionStore hitting a legacy DB missing the scope column -> SessionError (turns a later 'no such column' into a clear up-front error)."""
-    from agentbuilder.runtime.sessions import SqliteSessionStore
+    """SqliteSessionStore reports a missing scope column during construction."""
+    from agentmaker.runtime.sessions import SqliteSessionStore
     p = _seed(tmp_path, "sess", "CREATE TABLE session_messages(role TEXT, content TEXT, created_at TEXT, metadata TEXT)")
     with pytest.raises(SessionError):
         SqliteSessionStore(p)
 
 
-def test_source_store_rejects_legacy_pk(tmp_path):
-    """SourceStore hitting a legacy single-column-PK chunks table -> RetrievalError (RAG can re-import from source)."""
-    from agentbuilder.rag.source_store import SourceStore
+def test_source_store_rejects_incomplete_primary_key(tmp_path):
+    """SourceStore rejects a chunk primary key without ownership dimensions."""
+    from agentmaker.rag.source_store import SourceStore
     p = _seed(tmp_path, "rag", "CREATE TABLE chunks(chunk_id TEXT PRIMARY KEY, content TEXT)")
     with pytest.raises(RetrievalError):
         SourceStore(p)
 
 
 def test_checkpoint_store_rejects_missing_scope_column(tmp_path):
-    """SqliteCheckpointStore hitting a legacy DB missing the scope column -> SessionError with migration guidance (require_columns runs before the dedup DELETE)."""
-    from agentbuilder.runtime.execution.checkpoint import SqliteCheckpointStore
+    """SqliteCheckpointStore reports a missing scope column before running deduplication."""
+    from agentmaker.runtime.execution.checkpoint import SqliteCheckpointStore
     p = _seed(tmp_path, "ckpt", "CREATE TABLE checkpoints(state TEXT, created_at TEXT)")
     with pytest.raises(SessionError, match="persistence contract"):                # clear error, not an opaque 'no such column'
         SqliteCheckpointStore(p)
@@ -144,11 +260,11 @@ def test_checkpoint_store_rejects_missing_scope_column(tmp_path):
 
 def test_checkpoint_store_missing_scope_with_data_row_keeps_clear_error(tmp_path):
     """With the scope column missing **and a data row present**, the self-check still runs before the dedup DELETE (whose GROUP BY on scope would otherwise hit 'no such column' first), preserving the migration guidance."""
-    from agentbuilder.runtime.execution.checkpoint import SqliteCheckpointStore
+    from agentmaker.runtime.execution.checkpoint import SqliteCheckpointStore
     p = str(tmp_path / "ckpt2.db")
     c = sqlite3.connect(p)
     c.execute("CREATE TABLE checkpoints(state TEXT, created_at TEXT)")
-    c.execute("INSERT INTO checkpoints VALUES ('{}', '2026-01-01')")   # with a row present, the old DELETE...GROUP BY base would raise 'no such column' first
+    c.execute("INSERT INTO checkpoints VALUES ('{}', '2026-01-01')")
     c.commit()
     c.close()
     with pytest.raises(SessionError, match="persistence contract"):
@@ -158,18 +274,18 @@ def test_checkpoint_store_missing_scope_with_data_row_keeps_clear_error(tmp_path
 # ---------- derived tables (tier C): drift -> drop+rebuild (no error); vec0 locked-in params raise ----------
 
 def test_bookkeeping_self_heals_drifted_pk(tmp_path):
-    """SqliteBookkeeping hitting a legacy single-column-PK table -> transparent drop+rebuild (derived data, no error); the rebuilt PK includes all scope dimensions."""
-    from agentbuilder.retrieval.index_sync import SqliteBookkeeping
-    from agentbuilder.retrieval.scope_sql import scope_column_names
+    """SqliteBookkeeping rebuilds derived state whose primary key omits scope dimensions."""
+    from agentmaker.retrieval.index_sync import SqliteBookkeeping
+    from agentmaker.retrieval.scope_sql import scope_column_names
     p = _seed(tmp_path, "bk", "CREATE TABLE index_sync_bookkeeping(id TEXT PRIMARY KEY, content_hash TEXT)")
     bk = SqliteBookkeeping(p)                            # no raise: derived data self-heals
     assert primary_key_columns(bk._db, "index_sync_bookkeeping") == {"id", *scope_column_names()}
 
 
 def test_vec_store_rejects_dimension_drift(tmp_path):
-    """SqliteVecStore hitting a legacy vec0 DB with a different dimension -> RetrievalError (dimension is locked in at first build and cannot be ALTERed)."""
+    """SqliteVecStore rejects a vec0 table whose locked dimension differs."""
     pytest.importorskip("sqlite_vec")                    # skip when the extension is absent
-    from agentbuilder.retrieval.backends.sqlite import SqliteVecStore
+    from agentmaker.retrieval.backends.sqlite import SqliteVecStore
     p = str(tmp_path / "vec.db")
     SqliteVecStore(dim=8, db_path=p)                     # first build: float[8]
     with pytest.raises(RetrievalError) as e:
@@ -180,8 +296,8 @@ def test_vec_store_rejects_dimension_drift(tmp_path):
 # ---------- session-store robustness (rollback / index / prune / circular refs) ----------
 
 def test_session_store_has_scope_index():
-    """session_messages has a scope composite index (load/clear/prune no longer full-scan once sessions grow)."""
-    from agentbuilder.runtime.sessions import SqliteSessionStore
+    """session_messages has a composite scope index for load, clear, and prune queries."""
+    from agentmaker.runtime.sessions import SqliteSessionStore
     store = SqliteSessionStore()
     idx = store._db.execute(
         "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='session_messages'").fetchall()
@@ -190,9 +306,9 @@ def test_session_store_has_scope_index():
 
 def test_session_store_append_rolls_back_on_failure():
     """On a failed append, the half-written transaction rolls back and the connection stays clean: later appends work and the failed row leaves no residue."""
-    from agentbuilder.runtime.sessions import SqliteSessionStore
-    from agentbuilder.core.message import Message
-    from agentbuilder.retrieval.scope import Scope
+    from agentmaker.runtime.sessions import SqliteSessionStore
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval.scope import Scope
     store = SqliteSessionStore()
     sc = Scope(user="u")
 
@@ -216,9 +332,9 @@ def test_session_store_append_rolls_back_on_failure():
 def test_session_store_prune_keep_last_and_before():
     """prune: keep_last retains only the most recent N; before deletes anything earlier than a time; supplying neither raises."""
     from datetime import datetime, timezone
-    from agentbuilder.runtime.sessions import SqliteSessionStore
-    from agentbuilder.core.message import Message
-    from agentbuilder.retrieval.scope import Scope
+    from agentmaker.runtime.sessions import SqliteSessionStore
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval.scope import Scope
     store = SqliteSessionStore()
     sc = Scope(user="u")
     for i in range(10):
@@ -244,9 +360,9 @@ def test_session_store_prune_before_normalizes_timezones():
     2. naive '..05:00:00' is a prefix of the cutoff '..05:00:00+00:00' -> judged smaller lexically, wrongly deleted (violating strict `<`).
     """
     from datetime import datetime, timezone, timedelta
-    from agentbuilder.runtime.sessions import SqliteSessionStore
-    from agentbuilder.core.message import Message
-    from agentbuilder.retrieval.scope import Scope
+    from agentmaker.runtime.sessions import SqliteSessionStore
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval.scope import Scope
     store = SqliteSessionStore()
 
     # 1. offset timestamp: 09:00 at +09:00 = 00:00Z, before the 05:00Z cutoff -> should delete
@@ -265,9 +381,9 @@ def test_session_store_prune_before_normalizes_timezones():
 
 def test_session_store_circular_metadata_raises_session_error():
     """Circular reference in metadata (json.dumps raises ValueError) -> normalized to SessionError, no bare exception escapes."""
-    from agentbuilder.runtime.sessions import SqliteSessionStore
-    from agentbuilder.core.message import Message
-    from agentbuilder.retrieval.scope import Scope
+    from agentmaker.runtime.sessions import SqliteSessionStore
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval.scope import Scope
     store = SqliteSessionStore()
     d = {}
     d["self"] = d
@@ -277,7 +393,7 @@ def test_session_store_circular_metadata_raises_session_error():
 
 def test_execution_state_circular_meta_raises_session_error():
     """ExecutionState.to_json on a circular reference (ValueError) is also normalized to SessionError."""
-    from agentbuilder.runtime.execution.state import ExecutionState
+    from agentmaker.runtime.execution.state import ExecutionState
     d = {}
     d["self"] = d
     with pytest.raises(SessionError):

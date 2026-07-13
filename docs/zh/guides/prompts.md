@@ -11,7 +11,7 @@
 这四个名字全部直接来自顶层包：
 
 ```python
-from agentbuilder import DEFAULT_PROMPTS, PromptRegistry, PromptTemplate, PromptError
+from agentmaker import DEFAULT_PROMPTS, PromptRegistry, PromptTemplate, PromptError
 ```
 
 注册表能直接回答几个问题。`keys()` 列出所有已注册的提示词名字，`text(key)` 返回当前的模板文本，`render(key, **kw)` 填充其占位符，`as_dict()` 返回一份 `{key: text}` 快照，供打印或导出：
@@ -62,7 +62,7 @@ agent.update_prompts({"chat.persona": "You are a terse, factual assistant. No sm
 当你覆盖一条提示词时，注册表会校验每一个已声明的占位符和每一个协议标记在你的新文本里是否仍然存在。只要缺了一个，覆盖就会当场以 `PromptError` 被拒绝，从而把一个本来只会在运行时才暴露的失败，提前到你做出改动的这一刻：
 
 ```python
-from agentbuilder import PromptError
+from agentmaker import PromptError
 
 # Valid: the required {query} placeholder is preserved, so this override is accepted.
 agent.update_prompts({"context.current_question": "[User asks]\n{query}"})
@@ -74,7 +74,7 @@ except PromptError as exc:
     print(exc)   # Invalid prompt override: missing placeholder ['query']
 ```
 
-`PromptError` 继承自 `AgentbuilderError`，因此你可以把它和框架的其他错误一起捕获。
+`PromptError` 继承自 `AgentmakerError`，因此你可以把它和框架的其他错误一起捕获。
 
 如果你直接构建模板，`PromptTemplate` 也提供同样的保证。它的构造函数接收文本，外加可选的 `variables` 和 `protected` 元组；`render(**kwargs)` 填充占位符，`with_text(new_template)` 返回一份文本不同但约束相同的副本，若新文本丢掉了某个占位符或协议标记，就抛出 `PromptError`：
 
@@ -86,11 +86,11 @@ reworded = tpl.with_text("Please answer the following.\n{query}")   # keeps {que
 
 ## 中文语言包
 
-框架默认使用英文，同时自带一套完整的中文包，一次调用即可覆盖每一条内置提示词，同时保留每条提示词的占位符和协议标记。应用它是瞬时的：它纯粹是文本替换，不涉及任何模型调用。该包位于 `agentbuilder.prompts.packs`，包含 `CHINESE_PROMPTS`（原始的 `{key: text}` 映射）和 `chinese_registry()`（一个返回全新中文注册表的辅助函数）。以下是 [`examples/08_prompt_packs.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/08_prompt_packs.py)，逐字照录：
+框架默认使用英文，同时自带一套完整的中文包，一次调用即可覆盖每一条内置提示词，同时保留每条提示词的占位符和协议标记。应用它是瞬时的：它纯粹是文本替换，不涉及任何模型调用。该包位于 `agentmaker.prompts.packs`，包含 `CHINESE_PROMPTS`（原始的 `{key: text}` 映射）和 `chinese_registry()`（一个返回全新中文注册表的辅助函数）。以下是 [`examples/08_prompt_packs.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/08_prompt_packs.py)，逐字照录：
 
 ```python
-from agentbuilder import DEFAULT_PROMPTS
-from agentbuilder.prompts.packs import CHINESE_PROMPTS, chinese_registry
+from agentmaker import DEFAULT_PROMPTS
+from agentmaker.prompts.packs import CHINESE_PROMPTS, chinese_registry
 
 # The default registry is English.
 print("default (English):", DEFAULT_PROMPTS.text("context.section.memory"))
@@ -111,8 +111,8 @@ print(f"(the Chinese pack has {len(CHINESE_PROMPTS)} entries, one per default pr
 - **`with_overrides`（按注册表、相互隔离）。** `chinese_registry()` 调用 `DEFAULT_PROMPTS.with_overrides(CHINESE_PROMPTS)`，它返回一份应用了该包的全新目录，而全局的 `DEFAULT_PROMPTS` 保持不变。把这份注册表通过 `prompts=` 传给某个 agent，就只有那个 agent 说中文：
 
     ```python
-    from agentbuilder import Agent
-    from agentbuilder.prompts.packs import chinese_registry
+    from agentmaker import Agent
+    from agentmaker.prompts.packs import chinese_registry
 
     agent = Agent("assistant", llm, prompts=chinese_registry())
     ```
@@ -132,7 +132,7 @@ agent.update_prompts(chinese_registry())
 第三方策略和工具可以把它们自己的提示词带入这套可枚举、可覆盖、可翻译的系统。`register(key, template, *, variables=(), protected=())` 会添加一个新条目。请在键上使用命名空间前缀，以避免和框架的内置名字冲突，并在副本上注册，这样就不会改动全局默认值：
 
 ```python
-from agentbuilder import Agent, DEFAULT_PROMPTS
+from agentmaker import Agent, DEFAULT_PROMPTS
 
 reg = DEFAULT_PROMPTS.copy()
 reg.register("myapp.greeting", "Greet {name} warmly and offer help.", variables=("name",))
@@ -145,9 +145,9 @@ print(reg.render("myapp.greeting", name="Ada"))
 
 `register` 只会添加新键：注册一个已经存在的键会抛出 `PromptError`，因此你不会不小心覆盖掉某条内置提示词。要修改一个已有条目，请改用 `update_prompts`（或注册表的 `override` / `with_overrides`）。
 
-## 下一步去哪
+## 下一步去哪里
 
 - [Agent 与工作流](agents.md)：了解 `prompts=` 构造参数，以及一个 agent 的注册表如何流向它的 harness 和子 agent。
 - [工具](tools.md)：了解工具描述和错误文案，它们全都是你可以改写的注册表条目。
 - [结构化输出](structured-output.md)、[记忆](memory.md) 和 [检索与 RAG](retrieval-and-rag.md)：了解这些子系统，它们的提示词（schema 指令、事实抽取、基于来源的作答）都收录在这份目录里。
-- [提示词 API 参考](../reference.md)：查看确切的签名。
+- [提示词 API 参考](../reference/prompts.md)：查看确切的签名（该节由英文 docstring 生成）。

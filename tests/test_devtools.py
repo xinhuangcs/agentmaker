@@ -1,4 +1,4 @@
-"""Trace Detective (agentbuilder.devtools) regression: deterministic parsing / health-check rules / rendering / LLM diagnosis / Web API.
+"""Trace Detective deterministic parsing, health checks, rendering, LLM diagnosis, and Web API tests.
 
 Fully hermetic: the LLM uses the official ScriptedLLM stand-in, and trace events are hand-built to the
 trace_events field conventions. Two integration tests cross-check against the real pipeline
@@ -11,10 +11,10 @@ import json
 
 import pytest
 
-from agentbuilder import Agent, CalculatorTool, JsonlExporter, Tracer
-from agentbuilder.devtools import (DoctorHook, TraceDiagnosis, TraceParseError, diagnose,
+from agentmaker import Agent, CalculatorTool, JsonlExporter, Tracer
+from agentmaker.devtools import (DoctorHook, TraceDiagnosis, TraceParseError, diagnose,
                                    diagnose_trace, load_trace, parse_trace, pick_run, render_run)
-from agentbuilder.testing import ScriptedLLM
+from agentmaker.testing import ScriptedLLM
 
 
 def _events() -> list[dict]:
@@ -173,8 +173,8 @@ def test_diagnose_trace_convenience():
 def test_diagnose_prompt_follows_language_pack():
     """The diagnosis system prompt is centralized in the prompt registry (key devtools.diagnose): English by default, the Chinese pack swaps the whole set, and prompts= injection flows through.
     When language is omitted, the output language follows the pack's self-declared devtools.diagnose_language meta entry."""
-    from agentbuilder import DEFAULT_PROMPTS
-    from agentbuilder.prompts.packs import chinese_registry
+    from agentmaker import DEFAULT_PROMPTS
+    from agentmaker.prompts.packs import chinese_registry
 
     en = DEFAULT_PROMPTS.render("devtools.diagnose", language="English")
     zh = chinese_registry().render("devtools.diagnose", language="简体中文")
@@ -191,7 +191,7 @@ def test_diagnose_prompt_follows_language_pack():
 
 def test_diagnose_default_language_reaches_prompt():
     """Content-level assertion: with language omitted, the Chinese pack's system prompt and its self-declared output language actually reach the messages sent to the model."""
-    from agentbuilder.prompts.packs import chinese_registry
+    from agentmaker.prompts.packs import chinese_registry
 
     class SpyLLM(ScriptedLLM):
         """Records the messages chat receives so the prompt content can be asserted."""
@@ -262,7 +262,7 @@ def test_doctor_hook_warn_severity_and_run_fallback(capsys):
     tracer.emit({"type": "rag_retrieve", "query": "q", "hits": 0, "run_id": "r"})   # only a warn-level finding
     strict = DoctorHook(tracer, ScriptedLLM([]))                        # default tier: warn does not trigger
     asyncio.run(strict.on_run_end("out"))                               # called outside a run context, also covering the "fall back to newest run" path
-    from agentbuilder.prompts.packs import chinese_registry
+    from agentmaker.prompts.packs import chinese_registry
     aggressive = DoctorHook(tracer, ScriptedLLM([_diagnosis_json(healthy=True, first_bad_step=None)]),
                             severity="warn", prompts=chinese_registry())   # also covers prompts pass-through
     asyncio.run(aggressive.on_run_end("out"))
@@ -280,7 +280,7 @@ def client_factory():
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    from agentbuilder.devtools import create_app
+    from agentmaker.devtools import create_app
 
     def make(llm=None):
         return TestClient(create_app(llm))
@@ -306,7 +306,7 @@ def test_webapp_client_errors(client_factory, monkeypatch):
     client = client_factory()
     assert client.post("/api/parse", json={"trace": "not json"}).status_code == 400
     assert client.post("/api/diagnose", json={"trace": _jsonl()}).status_code == 503   # no LLM = parse-only mode
-    import agentbuilder.devtools.webapp as webapp_module
+    import agentmaker.devtools.webapp as webapp_module
     monkeypatch.setattr(webapp_module, "MAX_TRACE_CHARS", 10)
     assert client.post("/api/parse", json={"trace": _jsonl()}).status_code == 413
 
@@ -322,7 +322,7 @@ def test_webapp_diagnose(client_factory):
 
 
 def test_webapp_providers_and_model_choice(client_factory, monkeypatch):
-    import agentbuilder.devtools.webapp as webapp_module
+    import agentmaker.devtools.webapp as webapp_module
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-not-real")
     client = client_factory()                                     # no server-side default LLM
     data = client.get("/api/providers").json()
@@ -339,7 +339,7 @@ def test_webapp_providers_and_model_choice(client_factory, monkeypatch):
 
 
 def test_doctor_hook_provider_choice(capsys, monkeypatch):
-    import agentbuilder.devtools.doctor as doctor_module
+    import agentmaker.devtools.doctor as doctor_module
     built = {}
 
     def fake_client(provider=None, model=None, **_):

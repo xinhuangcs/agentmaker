@@ -3,9 +3,10 @@ import asyncio
 
 import pytest
 
-from agentbuilder import Agent, CalculatorTool, LLMClient
-from agentbuilder.core.adapters.tool_emulation import ToolEmulationAdapter
-from agentbuilder.core.llm_response import LLMResponse
+from agentmaker import Agent, CalculatorTool, LLMClient
+from agentmaker.core.adapters.tool_emulation import ToolEmulationAdapter
+from agentmaker.core.exceptions import LLMConfigError
+from agentmaker.core.llm_response import LLMResponse
 
 
 class _FakeDelegate:
@@ -46,6 +47,28 @@ def test_emulation_parses_and_strips_directive():
     messages, kwargs = d.seen[0]
     assert "tools" not in kwargs
     assert any(m["role"] == "system" and "search" in m["content"] for m in messages)
+
+
+def test_agent_streaming_tools_fail_fast_with_text_emulation():
+    """Text emulation is non-streaming, so Agent rejects the unsupported tool-loop combination."""
+    client = LLMClient("openai_compatible", model="m", api_key="test", base_url="http://localhost/v1",
+                       emulate_tools=True)
+    agent = Agent("a", client, tools=[CalculatorTool()])
+    with pytest.raises(LLMConfigError, match="does not support streaming tool calls"):
+        list(agent.stream_run("calculate 1+1"))
+
+
+def test_llm_client_streaming_tools_fail_fast_with_text_emulation():
+    """The direct LLMClient stream entry rejects tools when text emulation is active."""
+    client = LLMClient("openai_compatible", model="m", api_key="test", base_url="http://localhost/v1",
+                       emulate_tools=True)
+
+    async def consume():
+        return [piece async for piece in client.stream(
+            [{"role": "user", "content": "search"}], tools=_SEARCH_TOOL)]
+
+    with pytest.raises(LLMConfigError, match="does not support streaming tool calls"):
+        asyncio.run(consume())
 
 
 def test_emulation_parses_tool_call_with_braces_in_arguments():
@@ -106,7 +129,7 @@ def test_llmclient_emulate_tools_wires_shim_and_sets_fc():
     client = LLMClient(provider="openai_compatible", model="local-model", api_key="x",
                        base_url="http://localhost:1234/v1", supports_function_calling=False, emulate_tools=True)
     assert isinstance(client._adapter, ToolEmulationAdapter)
-    assert client.supports_function_calling is True           # emulated via the shim, so a tool-enabled Agent no longer fails loud
+    assert client.supports_function_calling is True
 
 
 class _EmuLLM:

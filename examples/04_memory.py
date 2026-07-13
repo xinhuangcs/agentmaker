@@ -6,9 +6,9 @@ SQLite backend. In production, swap FakeEmbedder() for OpenAIEmbedder() (needs O
 
     uv run python examples/04_memory.py
 """
-from agentbuilder import Memory, MemoryStore
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 memory = Memory(retriever=build_sqlite_hybrid(FakeEmbedder()), store=MemoryStore())
 

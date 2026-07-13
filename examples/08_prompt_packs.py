@@ -6,8 +6,8 @@ protocol tokens. No LLM call, so this runs instantly.
 
     uv run python examples/08_prompt_packs.py
 """
-from agentbuilder import DEFAULT_PROMPTS
-from agentbuilder.prompts.packs import CHINESE_PROMPTS, chinese_registry
+from agentmaker import DEFAULT_PROMPTS
+from agentmaker.prompts.packs import CHINESE_PROMPTS, chinese_registry
 
 # The default registry is English.
 print("default (English):", DEFAULT_PROMPTS.text("context.section.memory"))

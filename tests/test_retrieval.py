@@ -1,21 +1,117 @@
-"""End-to-end regression for the retrieval backend (hermetic: local sqlite-vec + FTS5, no key / no network).
-
-Locks down several fixes: upsert dedup in the vector store / keyword index, same id in different scopes not clobbering,
-the scope-delete boundary (B semantics), RRF not merging on empty ids, hybrid half-write compensation, table-name
-validation, embedding return-count / dimension validation.
-"""
+"""Hermetic retrieval backend contract tests."""
 
 import sqlite3
 import threading
+import time
 
 import pytest
 
-from agentbuilder.core.exceptions import RetrievalError
-from agentbuilder.retrieval import (Fts5KeywordIndex, HybridRetriever, OpenAIEmbedder, RetrievalResult, Scope,
+from agentmaker.core.exceptions import RetrievalError
+from agentmaker.retrieval import (Fts5KeywordIndex, HybridRetriever, OpenAIEmbedder, RetrievalResult, Scope,
                               SqliteVecStore, build_sqlite_hybrid, reciprocal_rank_fusion)
-from agentbuilder.retrieval.backends.sqlite import SqliteHybridRetriever  # internal class, not exported at the top level
+from agentmaker.retrieval.backends.sqlite import SqliteHybridRetriever  # internal class, not exported at the top level
+from agentmaker.retrieval.index_sync import InMemoryBookkeeping, SyncBookkeeping, SyncIndexSync
+from agentmaker.retrieval.scope import canonical_scope
 
 MEM = Scope(base="memory")
+
+
+def test_index_sync_rejects_misaligned_batches_and_serializes_same_id():
+    """zip must not truncate writes, and overlapping scope ranges serialize the same id."""
+    class Recorder:
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+            self.lock = threading.Lock()
+
+        def add(self, ids, contents, *, scope=None, metadatas=None):
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            time.sleep(0.02)
+            with self.lock:
+                self.active -= 1
+
+        def delete(self, ids, *, scope=None):
+            pass
+
+    recorder = Recorder()
+    sync = SyncIndexSync(recorder)
+    sibling_sync = SyncIndexSync(recorder)
+    with pytest.raises(RetrievalError, match="same length"):
+        sync.index(["a", "b"], ["one"], scope=MEM)
+    with pytest.raises(RetrievalError, match="metadatas"):
+        sync.index(["a"], ["one"], scope=MEM, metadatas=[])
+    fine = next(
+        Scope(base="memory", user="alice", session=str(i))
+        for i in range(128)
+        if hash((Scope(base="memory"), "same")) % 64
+        != hash((Scope(base="memory", user="alice", session=str(i)), "same")) % 64
+    )
+    threads = [
+        threading.Thread(target=current.index, args=(["same"], [content]),
+                         kwargs={"scope": scope})
+        for current, content, scope in (
+            (sync, "one", MEM), (sibling_sync, "two", fine))
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert recorder.max_active == 1
+
+
+def test_index_sync_drop_range_preserves_unlisted_sibling_footprints():
+    class Recorder:
+        def __init__(self):
+            self.rows = set()
+
+        def add(self, ids, contents, *, scope=None):
+            self.rows.update((scope, id_) for id_ in ids)
+
+        def delete(self, ids, *, scope=None):
+            raise AssertionError("drop_range must not use coarse deletion")
+
+        def delete_exact(self, ids, *, scope=None):
+            self.rows.difference_update((scope, id_) for id_ in ids)
+
+    target = Scope(base="memory", user="alice", agent="target")
+    sibling = Scope(base="memory", user="alice", agent="sibling")
+    recorder = Recorder()
+    sync = SyncIndexSync(recorder)
+    sync.index(["same"], ["target"], scope=target)
+    sync.index(["same"], ["sibling"], scope=sibling)
+
+    sync.drop_range({target: ["same"]}, scope=Scope(base="memory", user="alice"))
+
+    assert recorder.rows == {(sibling, "same")}
+    assert sync.tracked_ids(scope=target) == set()
+    assert sync.tracked_ids(scope=sibling) == {"same"}
+
+
+def test_scope_empty_strings_are_normalized_consistently():
+    scope = Scope(base="", user="", agent="writer")
+    assert scope == Scope(agent="writer")
+    assert canonical_scope(Scope(base="", user="alice"), "memory", "test") == Scope(
+        base="memory", user="alice")
+
+
+@pytest.mark.parametrize("value", [0, False, 1.5, object()])
+def test_scope_rejects_non_string_dimensions(value):
+    with pytest.raises(TypeError, match="Scope.user must be a string or None"):
+        Scope(user=value)
+
+
+@pytest.mark.parametrize("dimensions", [0, -1])
+def test_openai_embedder_rejects_nonpositive_dimensions(dimensions):
+    with pytest.raises(RetrievalError, match="dimensions"):
+        OpenAIEmbedder(api_key="test", dimensions=dimensions)
+
+
+@pytest.mark.parametrize("timeout", [0, -1])
+def test_openai_embedder_rejects_nonpositive_timeout(timeout):
+    with pytest.raises(RetrievalError, match="timeout"):
+        OpenAIEmbedder(api_key="test", timeout=timeout)
 
 
 # ---------- SqliteVecStore ----------
@@ -116,7 +212,7 @@ def test_keyword_rejects_unsafe_table_name():
 # ---------- reciprocal_rank_fusion ----------
 
 def test_rrf_empty_ids_are_not_merged():
-    """Two different bodies, both without an id -> must not be wrongly merged into one (before the fix, empty ids clobbered each other)."""
+    """Distinct id-less results remain separate."""
     l1 = [RetrievalResult(content="aaa", score=1.0, source="vector")]
     l2 = [RetrievalResult(content="bbb", score=1.0, source="keyword")]
     fused = reciprocal_rank_fusion([l1, l2], top_k=10)
@@ -262,7 +358,7 @@ def test_embedder_happy_path_aligns_by_index():
 
 
 def test_embedder_batches_large_input():
-    """Over max_batch, it auto-splits into serial batched calls and concatenates in input order (a large ingest no longer fails as one batch)."""
+    """Inputs over max_batch are split into ordered serial batches."""
     calls = []
 
     class _BatchClient:
@@ -282,7 +378,7 @@ def test_embedder_batches_large_input():
 
 def test_digest_includes_metadata():
     """_digest folds in metadata (a change triggers a rewrite); empty metadata falls back to a pure-content hash (so old paths like memory keep the same fingerprint and don't trigger a full re-embed)."""
-    from agentbuilder.retrieval.index_sync import _digest
+    from agentmaker.retrieval.index_sync import _digest
     assert _digest("x") == _digest("x", None) == _digest("x", {})            # empty metadata falls back to a pure-content hash
     assert _digest("x", {"doc_id": "a"}) != _digest("x", {"doc_id": "b"})    # metadata changes -> fingerprint changes
     assert _digest("x", {"doc_id": "a"}) != _digest("x")                     # with vs without metadata -> different
@@ -290,7 +386,7 @@ def test_digest_includes_metadata():
 
 def test_contextualizer_fingerprint_tracks_prompt_and_model():
     """LLMContextualizer.fingerprint varies with prompt / model (a change on reimport isn't wrongly short-circuited by the fingerprint); the base class defaults to its class name."""
-    from agentbuilder.rag.contextualizer import HeadingContextualizer, LLMContextualizer
+    from agentmaker.rag.contextualizer import HeadingContextualizer, LLMContextualizer
     stub = type("L", (), {"model": "m"})()
     assert HeadingContextualizer().fingerprint() == "HeadingContextualizer"
     assert LLMContextualizer(stub, context_prompt="A").fingerprint() != LLMContextualizer(stub, context_prompt="B").fingerprint()
@@ -337,7 +433,7 @@ def test_search_many_batch_embeds_once():
 
 def test_metadata_filter_end_to_end():
     """With metadata columns declared: add ingests with metadatas, and search narrows both candidate paths by eq / in."""
-    from agentbuilder.retrieval import MetadataFilter
+    from agentmaker.retrieval import MetadataFilter
     hr = build_sqlite_hybrid(_FakeEmbedder(), metadata_columns=("doc_id", "tag"))
     hr.add(["c1", "c2", "c3"], ["报销制度 交通", "报销制度 住宿", "假勤制度 年假"], scope=MEM,
            metadatas=[{"doc_id": "D1", "tag": "policy"}, {"doc_id": "D1", "tag": "policy"},
@@ -352,7 +448,7 @@ def test_metadata_filter_end_to_end():
 
 def test_metadata_filter_undeclared_key_fails_loud():
     """Filtering an undeclared field fails loud (a silent empty result is hard to debug); an illegal operator is caught at construction."""
-    from agentbuilder.retrieval import MetadataFilter
+    from agentmaker.retrieval import MetadataFilter
     hr = build_sqlite_hybrid(_FakeEmbedder(), metadata_columns=("doc_id",))
     hr.add(["c1"], ["hello"], scope=MEM, metadatas=[{"doc_id": "D1"}])
     with pytest.raises(RetrievalError):
@@ -386,20 +482,20 @@ def test_embedder_fingerprint_blocks_model_swap(tmp_path):
         build_sqlite_hybrid(_NamedEmbedder("model-b"), db_path=db)       # same dim, different model -> rejected
 
 
-def test_embedder_fingerprint_upgrades_unknown_model(tmp_path):
-    """An old record with no model name (a custom Embedder gave no model_id): matching dimensions pass and the fingerprint is backfilled, after which a named-model swap can be caught."""
+def test_embedder_fingerprint_records_known_model(tmp_path):
+    """A dimension-only fingerprint accepts and records a compatible named model."""
     db = str(tmp_path / "fp2.db")
     build_sqlite_hybrid(_FakeEmbedder(), db_path=db).close()             # no model_id: records "|3"
     build_sqlite_hybrid(_NamedEmbedder("model-a"), db_path=db).close()   # matching dim -> passes and backfills to model-a
     with pytest.raises(RetrievalError):
-        build_sqlite_hybrid(_NamedEmbedder("model-b"), db_path=db)       # now the model swap can be caught
+        build_sqlite_hybrid(_NamedEmbedder("model-b"), db_path=db)
 
 
 # ---------- fusion strategy seam: RRF by default, injectable replacement ----------
 
 def test_fusion_strategy_injectable():
     """With a custom FusionStrategy injected, hybrid's fusion uses it (not the hardwired RRF); the default is still RRFFusion."""
-    from agentbuilder.retrieval import FusionStrategy, RRFFusion
+    from agentmaker.retrieval import FusionStrategy, RRFFusion
 
     class _TakeKeywordOnly(FusionStrategy):
         def fuse(self, result_lists, *, top_k):
@@ -448,7 +544,7 @@ class _CountingRetriever:
 
 def test_sqlite_bookkeeping_idempotent_across_instances(tmp_path):
     """Persistent bookkeeping: rewriting the same content in a "new process" (fresh SyncIndexSync + same bookkeeping DB) is still skipped by the fingerprint, no repeat embedding."""
-    from agentbuilder.retrieval import SqliteBookkeeping, SyncIndexSync
+    from agentmaker.retrieval import SqliteBookkeeping, SyncIndexSync
     db = str(tmp_path / "bk.db")
     r1 = _CountingRetriever()
     s1 = SyncIndexSync(r1, bookkeeping=SqliteBookkeeping(db))
@@ -464,7 +560,7 @@ def test_sqlite_bookkeeping_idempotent_across_instances(tmp_path):
 
 def test_sqlite_bookkeeping_pending_survives_restart(tmp_path):
     """A failed write is marked pending: the pending set is persisted, still visible after a restart, and cleared once reconcile converges."""
-    from agentbuilder.retrieval import SqliteBookkeeping, SyncIndexSync
+    from agentmaker.retrieval import SqliteBookkeeping, SyncIndexSync
     from collections import namedtuple
     db = str(tmp_path / "bk2.db")
     r = _CountingRetriever()
@@ -506,7 +602,7 @@ def test_sqlite_vec_store_zero_dim_fails_loud():
 
 def test_hybrid_rejects_invalid_config_at_construction():
     """Invalid config (negative rrf_k / candidate_pool < top_k) is rejected at construction, not deferred to search time."""
-    from agentbuilder.retrieval import RetrievalConfig
+    from agentmaker.retrieval import RetrievalConfig
     with pytest.raises(ValueError):
         HybridRetriever(_FakeEmbedder(), SqliteVecStore(dim=3), _BoomKeyword(),
                         config=RetrievalConfig(rrf_k=-1))
@@ -514,11 +610,75 @@ def test_hybrid_rejects_invalid_config_at_construction():
 
 def test_metadata_filter_eq_rejects_none():
     """A MetadataFilter with op='eq' can't have a None value (in SQL, = NULL is always false -> a silent zero-hit)."""
-    from agentbuilder.retrieval import MetadataFilter
+    from agentmaker.retrieval import MetadataFilter
     with pytest.raises(RetrievalError):
         MetadataFilter("doc_id", None)                             # eq None -> fail loud
     with pytest.raises(RetrievalError):
         MetadataFilter("doc_id", None, op="eq")
+
+
+# ---------- legacy seam compatibility (stores without exact deletes keep working) ----------
+
+class _LegacyStore:
+    """Duck store with only the pre-exact surface (add/search/delete): records ranged deletes."""
+
+    def __init__(self):
+        self.rows = {}
+        self.ranged_deletes = []
+
+    def add(self, ids, vectors_or_contents, contents=None, *, scope=None, metadatas=None):
+        for i in ids:
+            self.rows[i] = scope
+
+    def search(self, *args, **kwargs):
+        return []
+
+    def delete(self, ids, *, scope=None):
+        self.ranged_deletes.append((list(ids), scope))
+        for i in ids:
+            self.rows.pop(i, None)
+
+    def close(self):
+        pass
+
+
+def test_hybrid_replace_falls_back_to_ranged_delete_for_legacy_stores():
+    """replace / delete_exact degrade to ranged deletes when either store lacks delete_exact, instead of raising after the new batch was written."""
+    vec, kw = _LegacyStore(), _LegacyStore()
+    hr = HybridRetriever(embedder=_FakeEmbedder(), vector_store=vec, keyword_index=kw)
+
+    hr.add(["old1", "old2"], ["旧一", "旧二"], scope=MEM)
+    hr.replace(["old1", "old2"], ["new1"], ["新一"], scope=MEM)
+
+    assert set(vec.rows) == set(kw.rows) == {"new1"}
+    assert vec.ranged_deletes and kw.ranged_deletes            # stale ids went through the ranged fallback
+
+    hr.delete_exact(["new1"], scope=MEM)
+    assert vec.rows == {} and kw.rows == {}
+
+
+def test_exact_delete_fallback_refuses_fully_empty_footprint():
+    """The ranged fallback for an all-empty footprint would span the whole store, so it fails loud instead of deleting."""
+    vec, kw = _LegacyStore(), _LegacyStore()
+    hr = HybridRetriever(embedder=_FakeEmbedder(), vector_store=vec, keyword_index=kw)
+    hr.add(["a"], ["内容"], scope=MEM)
+    with pytest.raises(RetrievalError):
+        hr.delete_exact(["a"])
+    assert "a" in vec.rows and "a" in kw.rows
+
+
+def test_sync_index_sync_exact_drop_falls_back_for_legacy_retriever():
+    """SyncIndexSync.drop_exact on a retriever without delete_exact degrades to a ranged delete and still updates bookkeeping."""
+    from agentmaker.retrieval import SyncIndexSync
+
+    retriever = _LegacyStore()
+    sync = SyncIndexSync(retriever)
+    sync.index(["a"], ["内容"], scope=MEM)
+    assert "a" in sync.tracked_ids(scope=MEM)
+
+    sync.drop_exact(["a"], scope=MEM, strict=True)
+    assert retriever.ranged_deletes == [(["a"], MEM)]
+    assert "a" not in sync.tracked_ids(scope=MEM)
 
 
 # ---------- retrieval bookkeeping (ghost-pending cleanup + InMemory scope normalization) ----------
@@ -527,22 +687,163 @@ class _NoopRetriever:
     """Minimal retriever stub: add / delete are no-ops (reconcile / drop only need these two)."""
     def add(self, ids, contents, *, scope=None, metadatas=None): pass
     def delete(self, ids, *, scope=None): pass
+    delete_exact = delete
 
 
 def test_reconcile_clears_ghost_pending():
     """An id marked pending on failure and then deleted from the source (a ghost): one reconcile stops it lingering in pending() forever."""
-    from agentbuilder.retrieval import SyncIndexSync
+    from agentmaker.retrieval import SyncIndexSync
     sync = SyncIndexSync(_NoopRetriever())
     sync.bookkeeping.mark_pending(MEM, ["ghost"])                  # best-effort write failure marks it pending
     assert "ghost" in sync.pending(scope=MEM)
-    sync.reconcile([], scope=MEM)                                  # the source of truth no longer has this id (empty source)
-    assert "ghost" not in sync.pending(scope=MEM)                  # the ghost is cleared, no longer lingering forever
+    sync.reconcile([], scope=MEM)
+    assert "ghost" not in sync.pending(scope=MEM)
 
 
 def test_inmemory_bookkeeping_normalizes_none_scope():
     """InMemoryBookkeeping normalizes None to Scope(), matching SqliteBookkeeping (behavior doesn't drift across backends)."""
-    from agentbuilder.retrieval import InMemoryBookkeeping
+    from agentmaker.retrieval import InMemoryBookkeeping
     bk = InMemoryBookkeeping()
     bk.set_hashes(None, [("x", "h1")])                            # write with a None scope
     assert bk.get_hash(Scope(), "x") == "h1"                      # read via Scope() (same bucket)
     assert bk.tracked_ids(None) == bk.tracked_ids(Scope()) == {"x"}
+
+
+def test_pending_aggregates_exact_footprints_under_a_coarse_scope():
+    from agentmaker.retrieval import InMemoryBookkeeping
+
+    bookkeeping = InMemoryBookkeeping()
+    sync = SyncIndexSync(_NoopRetriever(), bookkeeping=bookkeeping)
+    first = Scope(base="memory", user="alice", agent="first")
+    second = Scope(base="memory", user="alice", agent="second")
+    bookkeeping.mark_pending(first, ["a"])
+    bookkeeping.mark_pending(second, ["b"])
+
+    assert sync.pending(scope=Scope(base="memory", user="alice")) == {"a", "b"}
+
+
+class _FailingBookkeeping(SyncBookkeeping):
+    def __init__(self, operation):
+        self._delegate = InMemoryBookkeeping()
+        self.operation = operation
+
+    def _call(self, operation, *args):
+        if self.operation == operation:
+            raise RuntimeError(f"bookkeeping {operation} failed")
+        return getattr(self._delegate, operation)(*args)
+
+    def get_hash(self, *args): return self._call("get_hash", *args)
+    def set_hashes(self, *args): return self._call("set_hashes", *args)
+    def delete_hashes(self, *args): return self._call("delete_hashes", *args)
+    def tracked_ids(self, *args): return self._call("tracked_ids", *args)
+    def mark_pending(self, *args): return self._call("mark_pending", *args)
+    def clear_pending(self, *args): return self._call("clear_pending", *args)
+    def pending_ids(self, *args): return self._call("pending_ids", *args)
+    def exact_scopes(self, *args): return self._call("exact_scopes", *args)
+    def close(self): pass
+
+
+class _StateRetriever:
+    def __init__(self):
+        self.rows = {}
+
+    def add(self, ids, contents, *, scope=None, metadatas=None):
+        self.rows.update(zip(ids, contents))
+
+    def replace(self, old_ids, new_ids, contents, *, scope=None, metadatas=None):
+        for id_ in old_ids:
+            self.rows.pop(id_, None)
+        self.rows.update(zip(new_ids, contents))
+
+    def delete(self, ids, *, scope=None):
+        for id_ in ids:
+            self.rows.pop(id_, None)
+
+    delete_exact = delete
+
+
+@pytest.mark.parametrize("operation", ["get_hash", "set_hashes", "clear_pending"])
+def test_index_remains_best_effort_when_bookkeeping_fails(operation):
+    retriever = _StateRetriever()
+    sync = SyncIndexSync(retriever, bookkeeping=_FailingBookkeeping(operation))
+
+    sync.index(["a"], ["value"], scope=MEM)
+
+    assert retriever.rows == {"a": "value"}
+
+
+@pytest.mark.parametrize("operation", ["delete_hashes", "set_hashes", "clear_pending"])
+def test_replace_does_not_report_physical_success_as_failure(operation):
+    retriever = _StateRetriever()
+    retriever.rows["old"] = "old"
+    sync = SyncIndexSync(retriever, bookkeeping=_FailingBookkeeping(operation))
+
+    sync.replace(["old"], ["new"], ["new"], scope=MEM)
+
+    assert retriever.rows == {"new": "new"}
+
+
+def test_replace_preserves_the_retriever_failure_when_bookkeeping_is_broken():
+    class BrokenReplace(_StateRetriever):
+        def replace(self, *args, **kwargs):
+            raise ValueError("physical replace failed")
+
+    sync = SyncIndexSync(BrokenReplace(), bookkeeping=_FailingBookkeeping("mark_pending"))
+    with pytest.raises(ValueError, match="physical replace failed"):
+        sync.replace(["old"], ["new"], ["new"], scope=MEM)
+
+
+def test_drop_and_reconcile_progress_survive_bookkeeping_failures():
+    from collections import namedtuple
+
+    retriever = _StateRetriever()
+    retriever.rows["old"] = "old"
+    drop_sync = SyncIndexSync(retriever, bookkeeping=_FailingBookkeeping("delete_hashes"))
+    drop_sync.drop(["old"], scope=MEM)
+    assert retriever.rows == {}
+
+    reconcile_sync = SyncIndexSync(retriever, bookkeeping=_FailingBookkeeping("set_hashes"))
+    item = namedtuple("Item", ("id", "content"))("new", "value")
+    assert reconcile_sync.reconcile([item], scope=MEM) == 1
+    assert retriever.rows == {"new": "value"}
+
+
+def test_drop_bookkeeping_failure_disables_stale_fingerprint_skips():
+    retriever = _StateRetriever()
+    bookkeeping = _FailingBookkeeping(None)
+    sync = SyncIndexSync(retriever, bookkeeping=bookkeeping)
+    exact = Scope(base="memory", user="alice", session="s1")
+
+    sync.index(["same"], ["value"], scope=exact)
+    bookkeeping.operation = "exact_scopes"
+    sync.drop(["same"], scope=Scope(base="memory", user="alice"))
+    assert retriever.rows == {}
+
+    sibling_sync = SyncIndexSync(retriever, bookkeeping=bookkeeping)
+    sibling_sync.index(["same"], ["value"], scope=exact)
+    assert retriever.rows == {"same": "value"}
+
+
+def test_sqlite_pending_range_prevents_cross_instance_stale_hash_skip(tmp_path):
+    from agentmaker.retrieval import SqliteBookkeeping
+
+    retriever = _StateRetriever()
+    path = str(tmp_path / "bookkeeping.db")
+    first_bookkeeping = SqliteBookkeeping(path)
+    second_bookkeeping = SqliteBookkeeping(path)
+    first = SyncIndexSync(retriever, bookkeeping=first_bookkeeping)
+    second = SyncIndexSync(retriever, bookkeeping=second_bookkeeping)
+    exact = Scope(base="memory", user="alice", session="s1")
+    coarse = Scope(base="memory", user="alice")
+
+    first.index(["same"], ["value"], scope=exact)
+    first_bookkeeping.exact_scopes = lambda scope: (_ for _ in ()).throw(
+        RuntimeError("enumeration failed"))
+    first.drop(["same"], scope=coarse)
+    assert retriever.rows == {}
+
+    second._state["fingerprints_trusted"] = True
+    second.index(["same"], ["value"], scope=exact)
+    assert retriever.rows == {"same": "value"}
+    first_bookkeeping.close()
+    second_bookkeeping.close()

@@ -1,11 +1,11 @@
 # 测试
 
-`agentbuilder.testing` 为你提供确定性的测试替身（test double，即用来在测试里顶替真实依赖的假实现），去替换 Agent 中那些原本要花钱或要访问网络的部分：LLM、embedder（嵌入器，把文本转成向量的组件）、检查点存储，以及生命周期钩子。把它们换进去，你的 Agent 测试就能在隔离环境中运行（不需要 API key、不联网、也不会有偶发抖动），从而可以针对一组预先编排好的模型响应，精确断言你的 Agent 到底做了什么。只要你为基于本框架构建的 Agent、tool、human-in-the-loop（HITL，即「人在回路」，高风险动作需人工确认的流程）或检索接线编写单元测试，就该用到这个模块。
+`agentmaker.testing` 为你提供确定性的测试替身（test double，即用来在测试里顶替真实依赖的假实现），去替换 Agent 中那些原本要花钱或要访问网络的部分：LLM、embedder（嵌入器，把文本转成向量的组件）、检查点存储，以及生命周期钩子。把它们换进去，你的 Agent 测试就能自洽（hermetic）运行：不需要 API key、不联网、也不会有偶发抖动，从而可以针对一组预先编排好的模型响应，精确断言你的 Agent 到底做了什么。只要你为基于本框架构建的 Agent、tool、human-in-the-loop（HITL，即「人在回路」，高风险动作需人工确认的流程）或检索接线编写单元测试，就该用到这个模块。
 
-这些工具不会从顶层 `agentbuilder` 命名空间重新导出，请直接从子模块导入：
+这些工具不会从顶层 `agentmaker` 命名空间重新导出，请直接从子模块导入：
 
 ```python
-from agentbuilder.testing import ScriptedLLM, FakeEmbedder, MemoryCheckpointStore, RecordingHook
+from agentmaker.testing import ScriptedLLM, FakeEmbedder, MemoryCheckpointStore, RecordingHook
 ```
 
 本模块只定义了这四个公开的测试替身：
@@ -24,8 +24,8 @@ from agentbuilder.testing import ScriptedLLM, FakeEmbedder, MemoryCheckpointStor
 向构造函数传入一个脚本条目列表。每个条目要么是一个普通的 `str`（文本回复），要么是一个现成的 `LLMResponse`（用于精确控制工具调用、用量或结束原因）：
 
 ```python
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 agent = Agent("assistant", ScriptedLLM(["Hello.", "Goodbye."]))
 assert agent.run("hi").final_output == "Hello."
@@ -52,11 +52,11 @@ ScriptedLLM(script=None, *, model="test", provider="test",
 ScriptedLLM.tool_call(name, arguments=None, *, call_id="call_1", content="") -> LLMResponse
 ```
 
-一个典型的工具循环会编排两个条目：先是模型请求调用 tool，然后写出最终答案。以下取自随包附带的 [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/01_quickstart.py)：
+一个典型的工具循环会编排两个条目：先是模型请求调用 tool，然后写出最终答案。以下取自随包附带的 [`examples/01_quickstart.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/01_quickstart.py)：
 
 ```python
-from agentbuilder import Agent, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -81,11 +81,11 @@ result = agent.run("What's the weather in Copenhagen?")
 print(result.final_output)
 ```
 
-当 tool 来自 [`ToolRegistry`](tools.md)（包括内置工具）时，同样的模式也适用。注意，你传给 `tool_call` 的名字是该 tool 注册时的名字（这里内置的计算器是 `"calculator"`），以下取自 [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/02_tools_and_registry.py)：
+当 tool 来自 [`ToolRegistry`](tools.md)（包括内置工具）时，同样的模式也适用。注意，你传给 `tool_call` 的名字是该 tool 注册时的名字（这里内置的计算器是 `"calculator"`），以下取自 [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/02_tools_and_registry.py)：
 
 ```python
-from agentbuilder import Agent, CalculatorTool, ToolRegistry, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, CalculatorTool, ToolRegistry, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -148,14 +148,14 @@ assert "".join(pieces) == "A streamed reply."
 内容为空时不会产出任何 chunk（空字符串产生的是空的流，而不是单个 `""`）。运行结束时，测试替身会把该响应的用量和结束原因记录到 `last_stream_stats` 上，与真实适配器上报流式统计的方式一致。若要对流式的用量或结束原因做断言，请编排一个完整的 `LLMResponse` 而不是一个裸字符串：
 
 ```python
-from agentbuilder.core.llm_response import LLMResponse
+from agentmaker.core.llm_response import LLMResponse
 
 llm = ScriptedLLM([LLMResponse(content="hello world", model="test",
                                finish_reason="stop", usage={"total_tokens": 5})])
 ```
 
 !!! note
-    `LLMResponse` 位于 `agentbuilder.core.llm_response`。只有当你想固定用量、`finish_reason` 或某个精确的 `tool_calls` 载荷时才需要它；对于普通的文本回复，一个纯字符串脚本条目就足够了。
+    `LLMResponse` 位于 `agentmaker.core.llm_response`。只有当你想固定用量、`finish_reason` 或某个精确的 `tool_calls` 载荷时才需要它；对于普通的文本回复，一个纯字符串脚本条目就足够了。
 
 ## 对一次运行做断言
 
@@ -179,7 +179,7 @@ assert result.usage.tool_calls == 1
 `FakeEmbedder` 是一个确定性、离线的 `Embedder`：相同的文本总是映射到相同的向量，不同的文本映射到不同的向量（每个向量都由一个 SHA-256 哈希推导得出并做 L2 归一化，因此余弦相似度依然有意义，检索也能真正区分不同的条目）。用它来测试检索和 RAG（Retrieval-Augmented Generation，检索增强生成，即先检索资料再让模型据此作答）的接线，无需调用真实的 embedding API。
 
 ```python
-from agentbuilder.testing import FakeEmbedder
+from agentmaker.testing import FakeEmbedder
 
 emb = FakeEmbedder(dim=8)
 assert emb.dim == 8
@@ -199,8 +199,8 @@ assert emb.embed(["dog"]) != emb.embed(["cat"])
 当 Agent 尝试运行一个需要确认的 tool 时，运行会挂起并返回一个 `interrupted == True` 的 `RunResult`。通过用挂起时携带的作用域调用 `resume(True, scope=...)` 来批准它：
 
 ```python
-from agentbuilder import Agent, Tool, ToolParameter, ToolResponse
-from agentbuilder.testing import MemoryCheckpointStore, ScriptedLLM
+from agentmaker import Agent, Tool, ToolParameter, ToolResponse
+from agentmaker.testing import MemoryCheckpointStore, ScriptedLLM
 
 
 class DeleteTool(Tool):
@@ -228,15 +228,15 @@ resumed = agent.resume(True, scope=result.interrupt.scope)
 assert resumed.final_output == "Done."
 ```
 
-完整的审批模型（包括拒绝动作以及一次性批准多个待处理调用）见 [护栏与 HITL](guardrails-and-hitl.md)。
+完整的审批模型（包括拒绝动作以及一次性批准多个待处理调用）见 [护栏与人在回路](guardrails-and-hitl.md)。
 
 ## RecordingHook
 
 `RecordingHook` 是一个 `Hook`，它会把收到的每一个生命周期事件以 `(event_name, key_param)` 元组的形式追加到自己的 `events` 列表中。用它来断言钩子的分发是否按你预期的顺序发生。通过 `hooks=[...]` 把它传给 Agent：
 
 ```python
-from agentbuilder import Agent
-from agentbuilder.testing import RecordingHook, ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import RecordingHook, ScriptedLLM
 
 hook = RecordingHook()
 Agent("assistant", ScriptedLLM(["Answer."]), hooks=[hook]).run("Question?")

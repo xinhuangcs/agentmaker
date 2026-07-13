@@ -1,6 +1,6 @@
-"""Hooks dispatch + Guardrails regression (hermetic) -- fills in two core extension points that were thinly covered.
+"""Hook dispatch and guardrail behavior.
 
-Hooks: nine lifecycle events fire via Agent.run with correctly destructured args (captured with agentbuilder.testing.RecordingHook).
+Hooks: nine lifecycle events fire via Agent.run with correctly destructured args (captured with agentmaker.testing.RecordingHook).
 Guardrails: CallableGuardrail sync / async dispatch, tripping raises GuardrailTripwireError, input vs output stages.
 """
 
@@ -8,11 +8,15 @@ import asyncio
 
 import pytest
 
-from agentbuilder import Agent
-from agentbuilder.core.exceptions import GuardrailTripwireError
-from agentbuilder.runtime.guardrails import CallableGuardrail, GuardrailResult
-from agentbuilder.testing import MemoryCheckpointStore, RecordingHook, ScriptedLLM
-from agentbuilder.tools import Tool, ToolParameter, ToolResponse
+from agentmaker import Agent
+from agentmaker.core.exceptions import GuardrailTripwireError
+from agentmaker.runtime.guardrails import CallableGuardrail, GuardrailResult
+from agentmaker.runtime.observability import Tracer
+from agentmaker.runtime.harness import Harness, _validate_structured
+from agentmaker.prompts import DEFAULT_PROMPTS
+from agentmaker.testing import MemoryCheckpointStore, RecordingHook, ScriptedLLM
+from agentmaker.tools import Tool, ToolParameter, ToolResponse
+from pydantic import RootModel
 
 
 class _EchoTool(Tool):
@@ -67,9 +71,93 @@ def test_hooks_on_error():
             raise ValueError("boom")
 
     hook = RecordingHook()
+    tracer = Tracer()
     with pytest.raises(ValueError):
-        Agent("t", _BoomLLM(), hooks=[hook]).run("x")
+        Agent("t", _BoomLLM(), hooks=[hook], tracer=tracer).run("x")
     assert ("on_error", "ValueError") in hook.events
+    event = next(e for e in tracer.events if e["type"] == "run_error")
+    assert event["error_type"] == "ValueError" and event["message"] == "boom"
+    assert event["run_id"] and event["step_index"] > 0
+
+
+def test_nested_agent_failure_absorbed_by_parent_emits_no_run_error():
+    """run_error is terminal: an AgentTool child whose LLM raises becomes a tool error, the parent completes, and no run_error event appears."""
+    from agentmaker.agents.multi_agent.agent_tool import AgentTool
+
+    class _ChildBoomLLM:
+        model = "b"
+        provider = "t"
+        supports_function_calling = True
+        context_window = None
+
+        async def chat(self, messages, *, tools=None, **kw):
+            raise ValueError("child boom")
+
+    tracer = Tracer()
+    child = Agent("worker", _ChildBoomLLM(), tracer=tracer)   # shared tracer, as in from_config setups
+    llm = ScriptedLLM([ScriptedLLM.tool_call("worker", {"task": "干活"}), "汇总完成"])
+    parent = Agent("parent", llm, tools=[AgentTool(child)], tracer=tracer)
+    assert parent.run("去").final_output == "汇总完成"
+    assert [e for e in tracer.events if e["type"] == "run_error"] == []
+
+
+def test_run_error_trace_failure_preserves_original_exception():
+    """A strict trace exporter cannot replace the run exception it was reporting."""
+    class BrokenExporter:
+        def export(self, event):
+            raise RuntimeError("export failed")
+
+        def close(self):
+            pass
+
+    class BrokenLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        async def chat(self, messages, **kwargs):
+            raise ValueError("model failed")
+
+    hook = RecordingHook()
+    tracer = Tracer(exporters=[BrokenExporter()], strict=True)
+    with pytest.raises(ValueError, match="model failed") as exc_info:
+        Agent("t", BrokenLLM(), tracer=tracer, hooks=[hook]).run("x")
+    assert ("on_error", "ValueError") in hook.events
+    assert any("Failed to emit run_error trace" in note for note in exc_info.value.__notes__)
+
+
+def test_stream_trace_failure_preserves_original_exception():
+    class BrokenExporter:
+        def export(self, event):
+            raise RuntimeError("export failed")
+
+        def close(self):
+            pass
+
+    class BrokenStreamLLM:
+        model = "broken"
+
+        async def stream(self, messages, **kwargs):
+            yield "partial"
+            raise ValueError("stream failed")
+
+    async def consume():
+        harness = Harness(BrokenStreamLLM(), tracer=Tracer(
+            exporters=[BrokenExporter()], strict=True))
+        return [piece async for piece in harness.astream_llm([])]
+
+    with pytest.raises(ValueError, match="stream failed") as exc_info:
+        asyncio.run(consume())
+    assert any("trace cleanup also failed" in note for note in exc_info.value.__notes__)
+
+
+def test_structured_validation_accepts_root_json_array():
+    """Pydantic root models accept array JSON, including a fenced response."""
+    schema = RootModel[list[int]]
+    plain, plain_error = _validate_structured(schema, "[1, 2]", DEFAULT_PROMPTS)
+    fenced, fenced_error = _validate_structured(schema, "```json\n[3, 4]\n```", DEFAULT_PROMPTS)
+    assert plain_error is None and plain is not None and plain.root == [1, 2]
+    assert fenced_error is None and fenced is not None and fenced.root == [3, 4]
 
 
 # ---------- Guardrails ----------
@@ -100,9 +188,7 @@ def test_async_callable_guardrail():
 
 
 def test_acheck_awaits_sync_signature_returning_awaitable():
-    """acheck also awaits an fn that is sync by signature but returns an awaitable, instead of silently passing:
-    a lambda wrapping an async call, or an object with async __call__ -- iscoroutinefunction recognizes neither (_is_async=False),
-    and before the fix both yielded an un-awaited coroutine that bool() judged truthy and let through. Asserts both directions."""
+    """acheck awaits a lambda or callable object whose synchronous signature returns an awaitable."""
     async def moderate(text):
         return "bad" not in text                                    # contains bad -> trips (passed=False)
 

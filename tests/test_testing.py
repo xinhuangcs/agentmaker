@@ -1,13 +1,13 @@
-"""Contract + usage regression for agentbuilder.testing (hermetic: no key / no network).
+"""Contract and usage tests for agentmaker.testing (hermetic: no key or network).
 
 Proves third parties can test their own agents with these doubles **for free and offline**: ScriptedLLM drives plain chat / tool loop / streaming / HITL, FakeEmbedder yields deterministic vectors that plug into the real sqlite retrieval backend, MemoryCheckpointStore resumes a suspended run, and RecordingHook captures events.
 """
 
 import pytest
 
-from agentbuilder import Agent
-from agentbuilder.tools import Tool, ToolParameter, ToolResponse
-from agentbuilder.testing import FakeEmbedder, MemoryCheckpointStore, RecordingHook, ScriptedLLM
+from agentmaker import Agent
+from agentmaker.tools import Tool, ToolParameter, ToolResponse
+from agentmaker.testing import FakeEmbedder, MemoryCheckpointStore, RecordingHook, ScriptedLLM
 
 
 class _EchoTool(Tool):
@@ -76,7 +76,7 @@ def test_scripted_llm_exhausted_raises():
 def test_scripted_llm_stream_calls_on_stats():
     """The stream's on_stats finalizer returns StreamStats (matching the real adapter contract: harness.astream_llm relies on it to record usage)."""
     import asyncio
-    from agentbuilder.core.llm_response import LLMResponse, StreamStats
+    from agentmaker.core.llm_response import LLMResponse, StreamStats
     llm = ScriptedLLM([LLMResponse(content="你好世界", model="test", finish_reason="stop",
                                    usage={"total_tokens": 5})])
     got = {}
@@ -91,7 +91,7 @@ def test_scripted_llm_stream_calls_on_stats():
 
 
 def test_scripted_llm_stream_empty_content_yields_no_chunk():
-    """Empty content yields no chunk (the old `or [0]` squeezed out an "", inconsistent with the real adapter's `if piece` semantics)."""
+    """Empty content yields no chunk, matching adapter `if piece` semantics."""
     import asyncio
     llm = ScriptedLLM([""])
 
@@ -120,8 +120,8 @@ def test_fake_embedder_deterministic_and_discriminating():
 def test_fake_embedder_in_real_retriever():
     """FakeEmbedder plugs into the real sqlite retrieval backend: write two entries, search for one's topic and hit it (offline)."""
     pytest.importorskip("sqlite_vec")
-    from agentbuilder.retrieval import Scope
-    from agentbuilder.retrieval.backends import build_sqlite_hybrid
+    from agentmaker.retrieval import Scope
+    from agentmaker.retrieval.backends import build_sqlite_hybrid
     r = build_sqlite_hybrid(FakeEmbedder(dim=16))
     sc = Scope(base="t")
     r.add(["a", "b"], ["猫喜欢吃鱼", "今天天气晴"], scope=sc)

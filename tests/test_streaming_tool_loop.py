@@ -1,4 +1,4 @@
-"""Streaming tool-loop regression: astream_run with tools.
+"""Streaming tool-loop behavior for astream_run with tools.
 
 Three layers:
 - Agent layer: ScriptedLLM drives the streaming tool loop (text deltas + tool execution + final answer + history persistence);
@@ -12,9 +12,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentbuilder import Agent, LLMResponse, Tool, ToolParameter, ToolResponse
-from agentbuilder.core.adapters.openai_compat import _StreamState
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, LLMResponse, RunPolicy, Tool, ToolParameter, ToolResponse
+from agentmaker.core.adapters.openai_compat import _StreamState
+from agentmaker.core.exceptions import (GuardrailTripwireError, LLMConfigError, LLMResponseError,
+                                        RunLimitExceeded)
+from agentmaker.runtime.guardrails import CallableGuardrail, GuardrailResult
+from agentmaker.testing import ScriptedLLM
+from agentmaker.testing import RecordingHook
 
 
 class EchoTool(Tool):
@@ -57,22 +61,39 @@ def test_astream_run_tool_loop_streams_text_and_executes_tool():
     assert llm.calls == 2
 
 
+def test_streaming_tool_loop_forwards_adapter_assistant_state():
+    """Streaming tool turns preserve adapter continuation state for the next model call."""
+    class _CaptureLLM(ScriptedLLM):
+        def __init__(self, script):
+            super().__init__(script)
+            self.seen = []
+
+        async def stream(self, messages, *, tools=None, **kwargs):
+            self.seen.append([dict(message) for message in messages])
+            async for item in super().stream(messages, tools=tools, **kwargs):
+                yield item
+
+    turn = ScriptedLLM.tool_call("echo_tool", {"text": "hi"})
+    turn.assistant_message = {"reasoning_content": "stream-reasoning"}
+    llm = _CaptureLLM([turn, "done"])
+    agent = Agent("t", llm, tools=[EchoTool()])
+    assert "".join(run(collect(agent, "question"))) == "done"
+    assistant = next(message for message in llm.seen[1] if message.get("role") == "assistant")
+    assert assistant["reasoning_content"] == "stream-reasoning"
+
+
 def test_astream_run_tool_loop_persists_one_turn_history():
     """History persistence matches arun's contract: one atomic user + final assistant turn (no tool trace stored)."""
     llm = ScriptedLLM([ScriptedLLM.tool_call("echo_tool", {"text": "x"}), "答案"])
     agent = Agent("t", llm, tools=[EchoTool()])
     run(collect(agent, "问题"))
-    history = run(agent.harness.session.aload(scope=agent.scope)) if hasattr(agent.harness, "session") else None
-    # session history is persisted via agent.add_messages; verify count and roles directly from the in-memory store
-    messages = run(agent.aget_history()) if hasattr(agent, "aget_history") else None
-    if messages is None:
-        pytest.skip("no in-memory history read interface; this assertion is covered by the arun same-path test")
+    messages = agent.get_history()
     assert [m.role for m in messages[-2:]] == ["user", "assistant"]
     assert messages[-1].content == "答案"
 
 
 def test_astream_run_without_tools_unchanged():
-    """astream_run on a tool-less agent takes the original plain-text path (backward compatible)."""
+    """astream_run on a tool-less agent uses the plain-text path."""
     agent = Agent("t", ScriptedLLM(["纯文本流式回复"]))
     pieces = run(collect(agent, "你好"))
     assert "".join(pieces) == "纯文本流式回复"
@@ -89,6 +110,170 @@ def test_astream_run_buffer_output_releases_after_final(monkeypatch):
     agent = Agent("t", llm, tools=[EchoTool()])
     pieces = run(collect(agent, "问", buffer_output=True))
     assert "".join(pieces) == "我先查一下。最终答案。"
+
+
+def test_buffered_tool_stream_guards_every_released_turn():
+    """Buffered mode blocks untrusted text from any streamed tool-loop turn."""
+    llm = ScriptedLLM([
+        LLMResponse(content="BLOCKED", model="test", tool_calls=[{
+            "id": "c1", "type": "function",
+            "function": {"name": "echo_tool", "arguments": "{\"text\": \"y\"}"}}]),
+        "safe final",
+    ])
+    agent = Agent(
+        "t", llm, tools=[EchoTool()],
+        output_guardrails=[CallableGuardrail(lambda text: "BLOCKED" not in text, message="blocked")],
+    )
+    received = []
+
+    async def consume():
+        async for piece in agent.astream_run("问", buffer_output=True):
+            received.append(piece)
+
+    with pytest.raises(GuardrailTripwireError, match="blocked"):
+        run(consume())
+    assert received == []
+    assert agent.get_history() == []
+
+
+def test_buffered_stream_checks_deadline_after_output_guardrail():
+    """Buffered text stays private when an async output guardrail crosses the run deadline."""
+    class SlowPass:
+        async def acheck(self, text):
+            await asyncio.sleep(0.03)
+            return GuardrailResult(True)
+
+    agent = Agent(
+        "t", ScriptedLLM(["late"]), output_guardrails=[SlowPass()],
+        run_policy=RunPolicy(deadline_seconds=0.01),
+    )
+    received = []
+
+    async def consume():
+        async for piece in agent.astream_run("问", buffer_output=True):
+            received.append(piece)
+
+    with pytest.raises(RunLimitExceeded, match="wall-clock time limit"):
+        run(consume())
+    assert received == []
+
+
+def test_delivered_stream_is_persisted_despite_deadline():
+    """A non-buffered stream the consumer already saw is committed to history even when the post-hoc guardrail crosses the deadline."""
+    class SlowPass:
+        async def acheck(self, text):
+            await asyncio.sleep(0.03)
+            return GuardrailResult(True)
+
+    agent = Agent(
+        "t", ScriptedLLM(["seen by user"]), output_guardrails=[SlowPass()],
+        run_policy=RunPolicy(deadline_seconds=0.01),
+    )
+    received = []
+
+    async def consume():
+        async for piece in agent.astream_run("问"):
+            received.append(piece)
+
+    run(consume())
+    assert "".join(received) == "seen by user"
+    assert [m.content for m in agent.get_history()] == ["问", "seen by user"]
+
+
+def test_undelivered_fallback_tail_still_obeys_deadline():
+    """The tool loop's fallback tail was never streamed, so a deadline crossing before it is released aborts the turn instead of committing it."""
+    class SlowPass:
+        async def acheck(self, text):
+            await asyncio.sleep(0.03)
+            return GuardrailResult(True)
+
+    class EmptyReplyLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        async def stream(self, messages, *, tools=None, **kwargs):
+            yield LLMResponse(content="")   # no text, no tool calls -> nudge then invalid-reply fallback tail
+
+    agent = Agent(
+        "t", EmptyReplyLLM(), tools=[EchoTool()], output_guardrails=[SlowPass()],
+        run_policy=RunPolicy(deadline_seconds=0.01),
+    )
+    received = []
+
+    async def consume():
+        async for piece in agent.astream_run("问"):
+            received.append(piece)
+
+    with pytest.raises(RunLimitExceeded, match="wall-clock time limit"):
+        run(consume())
+    assert received == []                       # the tail was gated by the deadline, never released
+    assert agent.get_history() == []            # and the turn is not committed
+
+
+def test_streaming_tool_loop_capability_opt_out_fails_fast():
+    """An explicit supports_streaming_tools=False is rejected before a tool-loop request starts."""
+    class OptOutLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+        supports_streaming_tools = False
+
+        async def stream(self, messages, **kwargs):
+            raise AssertionError("stream must not start")
+            yield ""
+
+    agent = Agent("t", OptOutLLM(), tools=[EchoTool()])
+    with pytest.raises(LLMConfigError, match="does not support streaming tool calls"):
+        run(collect(agent, "问"))
+
+
+def test_streaming_tool_loop_accepts_kwargs_duck_stream():
+    """A duck client whose stream takes tools via **kwargs is not misread as incapable."""
+    class KwargsDuckLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        def __init__(self):
+            self.saw_tools = False
+
+        async def stream(self, messages, **kwargs):
+            self.saw_tools = kwargs.get("tools") is not None
+            yield "答"
+            yield LLMResponse(content="答")
+
+    llm = KwargsDuckLLM()
+    agent = Agent("t2", llm, tools=[EchoTool()])
+    assert "".join(run(collect(agent, "问"))) == "答"
+    assert llm.saw_tools
+
+
+def test_streaming_tool_loop_requires_terminal_response():
+    """A tool-bearing stream must end with an LLMResponse carrying the turn state."""
+    class BrokenStreamLLM:
+        provider = "test"
+        context_window = None
+        supports_function_calling = True
+
+        async def stream(self, messages, *, tools=None, **kwargs):
+            yield "partial"
+
+    agent = Agent("t", BrokenStreamLLM(), tools=[EchoTool()])
+    with pytest.raises(LLMResponseError, match="without the terminal LLMResponse"):
+        run(collect(agent, "问", buffer_output=True))
+    assert agent.get_history() == []
+
+
+def test_after_model_fires_for_streaming_tool_turns():
+    """Each terminal streaming tool-loop response fires after_model."""
+    hook = RecordingHook()
+    agent = Agent(
+        "t", ScriptedLLM([ScriptedLLM.tool_call("echo_tool", {"text": "x"}), "done"]),
+        tools=[EchoTool()], hooks=[hook],
+    )
+    assert "".join(run(collect(agent, "问"))) == "done"
+    assert [name for name, *_ in hook.events].count("after_model") == 2
 
 
 def test_openai_stream_state_accumulates_tool_call_fragments():
@@ -127,7 +312,7 @@ def test_openai_stream_state_no_tools_returns_none():
 @pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="requires OPENAI_API_KEY for a real streaming tool smoke test")
 def test_real_openai_streaming_tool_loop_smoke():
     """Real smoke: gpt-4o-mini streams a call to the echo tool then answers token by token (verifies delta.tool_calls accumulation is actually correct)."""
-    from agentbuilder import LLMClient
+    from agentmaker import LLMClient
 
     llm = LLMClient("openai", model="gpt-4o-mini")
     tool = EchoTool()

@@ -1,25 +1,20 @@
-"""agentbuilder/memory boundary-hardening regression (hermetic: pure sqlite + fake retriever, no key / no network).
-
-Locks down a hardening pass over the memory subsystem: the source-of-truth composite key doesn't
-overwrite across scopes, get/update are scope-isolated, KV guards against an empty scope, search
-validates its params, an add whose index write fails is marked pending (source of truth authoritative,
-eventually consistent), search lazily cleans orphans, MemoryTool confirms per action, SmartWriter's
-fail_open is configurable, and store connections take a lock.
-"""
+"""Hermetic memory subsystem tests using SQLite and fake retrieval backends."""
 
 import sqlite3
 import threading
+import time
 
 import pytest
 
-from agentbuilder.core.exceptions import RetrievalError
-from agentbuilder.retrieval.hybrid import require_valid_top_k
-from agentbuilder.memory import Memory, MemoryStore
-from agentbuilder.memory.kv import KVMemory, KVStore
-from agentbuilder.memory.smart_writer import SmartWriter
-from agentbuilder.memory.memory_tool import MemoryTool
-from agentbuilder.memory.types import MemoryItem
-from agentbuilder.retrieval.scope import Scope
+from agentmaker.core.exceptions import RetrievalError
+from agentmaker.retrieval.hybrid import require_valid_top_k
+from agentmaker.memory import Memory, MemoryStore
+from agentmaker.memory.kv import KVMemory, KVStore
+from agentmaker.memory.smart_writer import SmartWriter
+from agentmaker.memory.memory_tool import MemoryTool
+from agentmaker.memory.types import MemoryItem
+from agentmaker.retrieval.scope import Scope
+from agentmaker.runtime.execution.run_context import reset_run, start_run
 
 ALICE = Scope(base="memory", user="alice")
 BOB = Scope(base="memory", user="bob")
@@ -47,6 +42,8 @@ class FakeRetriever:
     def delete(self, ids, *, scope=None):
         for i in ids:
             self.docs.pop(i, None)
+
+    delete_exact = delete
 
     def search(self, query, *, top_k=5, candidate_pool=20, scope=None):
         require_valid_top_k(top_k, candidate_pool=candidate_pool)  # same validation as the real backend, so the fake isn't laxer and can't mask candidate-pool bugs
@@ -112,13 +109,116 @@ def test_consolidate_soft_invalidates_and_averages_importance():
 
 def test_index_sync_close_delegates_to_bookkeeping():
     """SyncIndexSync.close delegates to bookkeeping.close (plugs the connection leak from from_config's default SqliteBookkeeping); the default no-op close doesn't raise."""
-    from agentbuilder.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
+    from agentmaker.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
     closed = []
     bk = InMemoryBookkeeping()
     bk.close = lambda: closed.append(1)
     SyncIndexSync(FakeRetriever(), bookkeeping=bk).close()
     assert closed == [1]                                                   # close delegated to bookkeeping
     SyncIndexSync(FakeRetriever()).close()                                 # default InMemoryBookkeeping: no-op close, must not raise
+
+
+def test_memory_close_respects_injected_resource_ownership():
+    from agentmaker.retrieval.index_sync import SyncIndexSync
+
+    retriever = FakeRetriever()
+    store = MemoryStore()
+    closed = []
+    store_close = store.close
+    retriever.close = lambda: closed.append("retriever")
+    store.close = lambda: closed.append("store")
+    sync = SyncIndexSync(retriever)
+    sync.close = lambda: closed.append("sync")
+
+    Memory(retriever, store, scope=ALICE, index_sync=sync).close()
+
+    assert closed == []
+    store_close()
+
+
+def test_memory_close_releases_only_resources_created_by_from_config():
+    from agentmaker import AgentmakerConfig
+
+    retriever = FakeRetriever()
+    store = MemoryStore()
+    retriever_closed = []
+    store_closed = []
+    sync_closed = []
+    store_close = store.close
+    retriever.close = lambda: retriever_closed.append(True)
+    store.close = lambda: store_closed.append(True)
+    memory = Memory.from_config(AgentmakerConfig(), retriever=retriever, store=store)
+    memory._sync.close = lambda: sync_closed.append(True)
+
+    memory.close()
+    memory.close()
+
+    assert sync_closed == [True]
+    assert retriever_closed == []
+    assert store_closed == []
+    store_close()
+
+
+def test_memory_close_releases_the_default_from_config_stack():
+    from agentmaker import AgentmakerConfig
+
+    class Embedder:
+        dim = 3
+
+        def embed(self, texts):
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    memory = Memory.from_config(AgentmakerConfig(), embedder=Embedder())
+    closed = []
+    sync_close = memory._sync.close
+    retriever_close = memory.retriever.close
+    store_close = memory.store.close
+    memory._sync.close = lambda: closed.append("sync")
+    memory.retriever.close = lambda: closed.append("retriever")
+    memory.store.close = lambda: closed.append("store")
+
+    memory.close()
+
+    assert closed == ["sync", "retriever", "store"]
+    sync_close()
+    retriever_close()
+    store_close()
+
+
+def test_memory_context_cleanup_does_not_mask_business_error():
+    memory = _memory()
+    memory._owns_sync = True
+    memory._sync.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
+
+    with pytest.raises(ValueError, match="business failed") as caught:
+        with memory:
+            raise ValueError("business failed")
+
+    assert any("Memory cleanup also failed" in note for note in caught.value.__notes__)
+
+
+@pytest.mark.parametrize("kind", ["kv_store", "kv_memory", "memory_store"])
+def test_storage_context_cleanup_does_not_mask_business_error(kind):
+    if kind == "kv_store":
+        resource = KVStore()
+        original_close = resource.close
+        resource.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
+    elif kind == "kv_memory":
+        kv = KVStore()
+        resource = KVMemory(kv)
+        original_close = kv.close
+        kv.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
+    else:
+        resource = MemoryStore()
+        original_close = resource.close
+        resource.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
+
+    with pytest.raises(ValueError, match="business failed") as caught:
+        with resource:
+            raise ValueError("business failed")
+
+    assert any("close failed" in note for note in caught.value.__notes__)
+    original_close()
 
 
 # ---------- source-of-truth composite key: same id across scopes doesn't overwrite ----------
@@ -138,6 +238,17 @@ def test_store_same_id_same_scope_overwrites():
     st.save(MemoryItem(content="v2", id="X"), scope=ALICE)          # same id + same scope -> upsert overwrites
     assert st.get("X", scope=ALICE).content == "v2"
     assert len(st.all(scope=ALICE)) == 1
+
+
+def test_store_coarse_point_access_rejects_ambiguous_siblings():
+    """Point access must not choose and collapse an arbitrary sibling scope."""
+    st = MemoryStore()
+    st.save(MemoryItem(content="a1", id="X"), scope=Scope(base="memory", user="alice", agent="a1"))
+    st.save(MemoryItem(content="a2", id="X"), scope=Scope(base="memory", user="alice", agent="a2"))
+    with pytest.raises(RetrievalError, match="multiple rows"):
+        st.get("X", scope=ALICE)
+    with pytest.raises(RetrievalError, match="multiple rows"):
+        st.replace("X", MemoryItem(content="new", id="X"), scope=ALICE)
 
 
 # ---------- get / update are scope-isolated, no cross-scope writes ----------
@@ -164,6 +275,191 @@ def test_memory_update_same_scope_works():
     assert m.update(item.id, "新内容").content == "新内容"
     assert m.store.get(item.id, scope=ALICE).content == "新内容"
     assert len(m.store.all(scope=ALICE)) == 1                      # delete-old + insert-new, no duplicate rows
+
+
+def test_coarse_update_preserves_the_exact_stored_scope():
+    store = MemoryStore()
+    fine = Scope(base="memory", user="alice", agent="writer")
+    store.save(MemoryItem(content="old", id="X"), scope=fine)
+    memory = Memory(retriever=FakeRetriever(), store=store,
+                    scope=Scope(base="memory", user="alice"))
+
+    memory.update("X", "new")
+
+    assert store.get("X", scope=fine).content == "new"
+    row = store._db.execute(
+        "SELECT base, sc_user, sc_agent, sc_session, sc_app FROM memories WHERE id = 'X'"
+    ).fetchone()
+    assert row == ("memory", "alice", "writer", "", "")
+
+
+def test_coarse_delete_clears_each_exact_bookkeeping_footprint():
+    from agentmaker.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
+
+    class ScopedRetriever:
+        def __init__(self):
+            self.rows = set()
+
+        def add(self, ids, contents, *, scope=None):
+            self.rows.update((scope, id_) for id_ in ids)
+
+        def delete(self, ids, *, scope=None):
+            self.rows = {
+                (stored_scope, id_) for stored_scope, id_ in self.rows
+                if id_ not in ids or not all(
+                    getattr(scope, name) is None
+                    or getattr(scope, name) == getattr(stored_scope, name)
+                    for name in ("base", "user", "agent", "session", "app")
+                )
+            }
+
+        def delete_exact(self, ids, *, scope=None):
+            self.rows.difference_update((scope, id_) for id_ in ids)
+
+    fine_scopes = [
+        Scope(base="memory", user="alice", agent="a"),
+        Scope(base="memory", user="alice", agent="b"),
+    ]
+    store = MemoryStore()
+    retriever = ScopedRetriever()
+    bookkeeping = InMemoryBookkeeping()
+    sync = SyncIndexSync(retriever, bookkeeping=bookkeeping)
+    for exact_scope in fine_scopes:
+        store.save(MemoryItem(content="value", id="X"), scope=exact_scope)
+        sync.index(["X"], ["value"], scope=exact_scope)
+        bookkeeping.mark_pending(exact_scope, ["X"])
+    memory = Memory(retriever, store, scope=ALICE, index_sync=sync)
+
+    memory.delete_many(["X"])
+
+    assert store.scopes_for_ids(["X"], scope=ALICE) == []
+    assert retriever.rows == set()
+    for exact_scope in fine_scopes:
+        assert sync.tracked_ids(scope=exact_scope) == set()
+        assert sync.pending(scope=exact_scope) == set()
+
+
+def test_coarse_rebuild_removes_orphan_only_fine_scope():
+    from agentmaker.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
+
+    class ScopedRetriever:
+        def __init__(self):
+            self.rows = set()
+
+        def add(self, ids, contents, *, scope=None):
+            self.rows.update((scope, id_) for id_ in ids)
+
+        def delete(self, ids, *, scope=None):
+            self.rows.difference_update((scope, id_) for id_ in ids)
+
+        delete_exact = delete
+
+    fine = Scope(base="memory", user="alice", agent="writer")
+    retriever = ScopedRetriever()
+    sync = SyncIndexSync(retriever, bookkeeping=InMemoryBookkeeping())
+    sync.index(["orphan"], ["stale"], scope=fine)
+    memory = Memory(retriever, MemoryStore(), scope=ALICE, index_sync=sync)
+
+    assert memory.rebuild_index() == 0
+    assert retriever.rows == set()
+    assert sync.exact_scopes(scope=ALICE) == set()
+
+
+def test_memory_store_delete_many_rolls_back_the_whole_batch():
+    store = MemoryStore()
+    store.save(MemoryItem(content="a", id="A"), scope=ALICE)
+    store.save(MemoryItem(content="b", id="B"), scope=ALICE)
+    store._db.execute(
+        "CREATE TRIGGER reject_b BEFORE DELETE ON memories "
+        "WHEN OLD.id = 'B' BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+    with pytest.raises(RetrievalError):
+        store.delete_many(["A", "B"], scope=ALICE)
+    assert store.get("A", scope=ALICE) is not None
+    assert store.get("B", scope=ALICE) is not None
+
+
+def test_memory_mutation_is_serialized_across_managers(tmp_path):
+    class BlockingRetriever:
+        def __init__(self):
+            self.first_started = threading.Event()
+            self.release_first = threading.Event()
+            self.contents = {}
+
+        def add(self, ids, contents, *, scope=None):
+            if contents == ["first"]:
+                self.first_started.set()
+                self.release_first.wait(timeout=2)
+            self.contents[ids[0]] = contents[0]
+
+        def delete(self, ids, *, scope=None):
+            pass
+
+    db = str(tmp_path / "shared-memory.db")
+    first_store = MemoryStore(db)
+    first_store.save(MemoryItem(content="initial", id="X"), scope=ALICE)
+    retriever = BlockingRetriever()
+    first = Memory(retriever, first_store, scope=ALICE)
+    second = Memory(retriever, MemoryStore(db), scope=ALICE)
+
+    first_thread = threading.Thread(target=first.update, args=("X", "first"))
+    second_thread = threading.Thread(target=second.update, args=("X", "second"))
+    first_thread.start()
+    assert retriever.first_started.wait(timeout=2)
+    second_thread.start()
+    time.sleep(0.02)
+    retriever.release_first.set()
+    first_thread.join(timeout=2)
+    second_thread.join(timeout=2)
+
+    assert first.store.get("X", scope=ALICE).content == "second"
+    assert retriever.contents["X"] == "second"
+
+
+def test_memory_per_call_scope_keeps_canonical_base_and_rejects_conflict():
+    m = Memory(retriever=FakeRetriever(), store=MemoryStore())
+    item = m.add("alice", scope=Scope(user="alice"))
+    assert m.store.get(item.id, scope=ALICE).content == "alice"
+    with pytest.raises(RetrievalError, match="scope.base"):
+        m.search("x", scope=Scope(base="rag", user="alice"))
+
+
+def test_memory_tool_merge_run_scope_isolates_users_and_rejects_conflict():
+    memory = Memory(retriever=FakeRetriever(), store=MemoryStore())
+    tool = MemoryTool(memory, scope_policy="merge_run")
+    token = start_run("alice", scope=Scope(user="alice"))
+    try:
+        tool.run({"action": "remember", "content": "alice secret"})
+    finally:
+        reset_run(token)
+    token = start_run("bob", scope=Scope(user="bob"))
+    try:
+        assert "alice secret" not in tool.run({"action": "recall", "query": "secret"}).text
+    finally:
+        reset_run(token)
+
+    fixed = MemoryTool(Memory(FakeRetriever(), MemoryStore(), scope=ALICE), scope_policy="merge_run")
+    token = start_run("bob2", scope=Scope(user="bob"))
+    try:
+        with pytest.raises(RetrievalError, match="conflicts"):
+            fixed.run({"action": "stats"})
+    finally:
+        reset_run(token)
+
+
+def test_memory_tool_guards_only_content_returning_actions():
+    tool = MemoryTool(_memory())
+    assert tool.is_external_content({"action": "recall"}) is True
+    assert tool.is_external_content({"action": "summary"}) is True
+    for action in ("remember", "stats", "forget", "consolidate"):
+        assert tool.is_external_content({"action": action}) is False
+
+
+def test_summary_without_query_honors_top_k():
+    m = _memory()
+    m.llm = object()
+    for i in range(5):
+        m.add(f"m{i}")
+    assert len(m._summary_items(None, 2)) == 2
 
 
 # ---------- KVStore empty-scope guard ----------
@@ -224,7 +520,7 @@ def test_search_large_top_k_passes_candidate_pool(top_k):
     m = _memory()
     for i in range(top_k + 2):
         m.add(f"记忆{i}")
-    hits = m.search("q", top_k=top_k)        # pre-fix: candidate_pool defaulted to 20 < pool -> require_valid_top_k raised
+    hits = m.search("q", top_k=top_k)
     assert isinstance(hits, list)
 
 
@@ -270,7 +566,7 @@ def test_memory_tool_action_level_confirmation():
 
 
 def test_memory_tool_confirmation_gated_via_registry():
-    from agentbuilder.tools.registry import ToolRegistry
+    from agentmaker.tools.registry import ToolRegistry
 
     asked = []
 
@@ -303,7 +599,7 @@ def test_smart_writer_parses_json_array_regardless():
 
 def test_smart_writer_prompts_overridable():
     """extract_prompt / reconcile_prompt can be overridden via constructor args; omitting them uses the public DEFAULT_* prompts; and they're actually sent to the LLM as the system message."""
-    from agentbuilder.memory import DEFAULT_EXTRACT_PROMPT, DEFAULT_RECONCILE_PROMPT
+    from agentmaker.memory import DEFAULT_EXTRACT_PROMPT, DEFAULT_RECONCILE_PROMPT
 
     class _RecMem:                       # stub memory: only exposes the cfg.similar_k SmartWriter's constructor reads
         cfg = type("C", (), {"similar_k": 5})()
@@ -326,7 +622,7 @@ def test_smart_writer_prompts_overridable():
     assert llm.system == "EX!"
     # an invalid override (dropped a protocol op) is caught by the registry
     import pytest as _pytest
-    from agentbuilder.prompts import PromptError
+    from agentmaker.prompts import PromptError
     with _pytest.raises(PromptError):
         SmartWriter(mem, object(), reconcile_prompt="只输出结论，别的不管")
 
@@ -394,7 +690,7 @@ def test_memory_async_api_smoke():
 # ---------- temporal validity (soft-invalidation) / usage feedback / conversation search ----------
 
 def test_invalidate_soft_deletes_but_keeps_history():
-    """invalidate: no longer retrievable (dropped from the index + filtered at read time), source of truth retained (include_invalid is auditable), with a supersession link."""
+    """invalidate excludes the item from retrieval while retaining its auditable supersession link."""
     m = _memory()
     old = m.add("用户现居上海")
     new = m.add("用户现居北京")
@@ -405,6 +701,40 @@ def test_invalidate_soft_deletes_but_keeps_history():
     assert old.id in hist and hist[old.id].invalid_at is not None       # source of truth retained
     assert hist[old.id].superseded_by == new.id                         # fact-evolution chain
     assert m.invalidate("不存在") is None
+
+
+def test_invalidate_drops_only_the_resolved_index_footprint():
+    broad = Scope(base="memory", user="alice")
+    sibling = Scope(base="memory", user="alice", session="s1")
+    item = MemoryItem(content="broad", id="shared")
+    store = MemoryStore()
+    store.save(item, scope=broad)
+
+    class ScopedSync:
+        def __init__(self):
+            self.entries = {(item.id, broad), (item.id, sibling)}
+
+        def drop(self, ids, *, scope=None):
+            fields = ("base", "user", "agent", "session", "app")
+            self.entries = {
+                entry for entry in self.entries
+                if entry[0] not in ids or any(
+                    getattr(scope, field) is not None
+                    and getattr(entry[1], field) != getattr(scope, field)
+                    for field in fields)
+            }
+
+        def drop_exact(self, ids, *, scope=None):
+            self.entries.difference_update((id_, scope) for id_ in ids)
+
+        def close(self):
+            pass
+
+    sync = ScopedSync()
+    memory = Memory(FakeRetriever(), store, scope=broad, index_sync=sync)
+
+    assert memory.invalidate(item.id) is not None
+    assert sync.entries == {(item.id, sibling)}
 
 
 def test_rebuild_does_not_resurrect_invalidated():
@@ -441,7 +771,7 @@ def test_smart_writer_update_supersedes_softly():
 def test_update_bumps_updated_at_and_recency_anchor():
     """update refreshes updated_at and recency decays off it; with recency_anchor=last_accessed it uses the hit time."""
     from datetime import datetime, timedelta
-    from agentbuilder.memory.types import MemoryConfig
+    from agentmaker.memory.types import MemoryConfig
     m = _memory()
     item = m.add("旧闻")
     # manually set created_at to 30 days ago (edit the source of truth directly)
@@ -467,11 +797,11 @@ def test_search_touches_last_accessed():
     assert m.store.get(item.id, scope=ALICE).last_accessed_at is not None
 
 
-def test_store_old_schema_auto_migrates_columns(tmp_path):
-    """An old DB missing new columns (updated_at etc.): opening it ALTERs the columns in automatically, without error (given a correct primary key)."""
+def test_store_adds_missing_optional_columns(tmp_path):
+    """A store with the required key receives any missing optional columns on open."""
     import sqlite3
-    from agentbuilder.retrieval.scope_sql import scope_column_names
-    db = str(tmp_path / "old_mem.db")
+    from agentmaker.retrieval.scope_sql import scope_column_names
+    db = str(tmp_path / "partial_mem.db")
     conn = sqlite3.connect(db)
     cols = ", ".join(f"{c} TEXT" for c in scope_column_names())
     pk = ", ".join(["id", *scope_column_names()])
@@ -486,9 +816,9 @@ def test_store_old_schema_auto_migrates_columns(tmp_path):
 
 def test_conversation_search_end_to_end():
     """ConversationSearch: wraps a SessionStore feeding the shared backend (isolated by base=conversation), searchable, and clear wipes the index too."""
-    from agentbuilder.core.message import Message
-    from agentbuilder.runtime import ConversationSearch, SqliteSessionStore
-    from agentbuilder.retrieval.scope import Scope as _S
+    from agentmaker.core.message import Message
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+    from agentmaker.retrieval.scope import Scope as _S
 
     class _ConvRetriever(FakeRetriever):
         def __init__(self):
@@ -516,11 +846,290 @@ def test_conversation_search_end_to_end():
     assert cs.load(scope=sc) == [] and retr.docs == {}
 
 
+def test_conversation_search_clear_keeps_source_when_exact_index_delete_fails():
+    from agentmaker.core.message import Message
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+
+    class FailingDelete(FakeRetriever):
+        def delete_exact(self, ids, *, scope=None):
+            raise RuntimeError("index delete failed")
+
+    retriever = FailingDelete()
+    search = ConversationSearch(SqliteSessionStore(), retriever)
+    scope = Scope(user="alice", session="one")
+    search.append(Message("keep me", "user"), scope=scope)
+
+    with pytest.raises(RuntimeError, match="index delete failed"):
+        search.clear(scope=scope)
+
+    assert [message.content for message in search.load(scope=scope)] == ["keep me"]
+
+
+def test_conversation_search_clear_falls_back_to_ranged_delete_for_legacy_backends():
+    """A retriever with only the pre-exact surface (add/delete) still supports clear: the exact drop degrades to a ranged delete over the footprint scope."""
+    from agentmaker.core.message import Message
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+
+    class CoarseOnlyRetriever:
+        def __init__(self):
+            self.deleted = []
+
+        def add(self, ids, contents, *, scope=None, metadatas=None):
+            pass
+
+        def delete(self, ids, *, scope=None):
+            self.deleted.append((list(ids), scope))
+
+    retriever = CoarseOnlyRetriever()
+    search = ConversationSearch(SqliteSessionStore(), retriever)
+    scope = Scope(user="alice", session="one")
+    search.append(Message("bye", "user"), scope=scope)
+
+    search.clear(scope=scope)
+
+    assert search.load(scope=scope) == []
+    assert retriever.deleted and retriever.deleted[0][1].session == "one"
+
+
+def test_conversation_search_clear_supports_legacy_index_sync_signature():
+    """A custom IndexSync written against the pre-strict abstract signature keeps working: strict downgrades to its best-effort drop contract."""
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval.index_sync import IndexSync
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+
+    class LegacySync(IndexSync):
+        def __init__(self):
+            self.dropped = []
+
+        def index(self, ids, contents, *, scope=None, metadatas=None):
+            pass
+
+        def replace(self, old_ids, new_ids, contents, *, scope=None, metadatas=None):
+            pass
+
+        def drop(self, ids, *, scope=None):
+            self.dropped.extend(ids)
+
+        def reconcile(self, items, *, scope=None, batch_size=256):
+            return 0
+
+        def pending(self, *, scope=None):
+            return set()
+
+    sync = LegacySync()
+    search = ConversationSearch(SqliteSessionStore(), FakeRetriever(), index_sync=sync)
+    scope = Scope(user="alice", session="one")
+    search.append(Message("bye", "user"), scope=scope)
+
+    search.clear(scope=scope)
+    assert search.load(scope=scope) == [] and len(sync.dropped) == 1
+
+    search.append(Message("all", "user"), scope=scope)
+    search.clear(all_scopes=True)
+    assert search.load(all_scopes=True) == [] and len(sync.dropped) == 2
+
+
+def test_conversation_search_clear_tolerates_strictless_drop_exact():
+    """A custom sync whose drop_exact lacks the strict flag still supports scoped clear (strict downgrades like drop)."""
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval.index_sync import IndexSync
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+
+    class ExactOnlySync(IndexSync):
+        def __init__(self):
+            self.exact_drops = []
+
+        def index(self, ids, contents, *, scope=None, metadatas=None):
+            pass
+
+        def replace(self, old_ids, new_ids, contents, *, scope=None, metadatas=None):
+            pass
+
+        def drop(self, ids, *, scope=None):
+            pass
+
+        def drop_exact(self, ids, *, scope=None):
+            self.exact_drops.append((list(ids), scope))
+
+        def reconcile(self, items, *, scope=None, batch_size=256):
+            return 0
+
+        def pending(self, *, scope=None):
+            return set()
+
+    sync = ExactOnlySync()
+    search = ConversationSearch(SqliteSessionStore(), FakeRetriever(), index_sync=sync)
+    scope = Scope(user="alice", session="one")
+    search.append(Message("bye", "user"), scope=scope)
+    search.clear(scope=scope)
+    assert search.load(scope=scope) == [] and len(sync.exact_drops) == 1
+
+
+def test_memory_mutations_support_legacy_duck_retriever():
+    """invalidate / delete / rebuild_index work against a retriever without delete_exact (the pre-exact published seam)."""
+
+    class LegacyRetriever:
+        def __init__(self):
+            self.docs = {}
+
+        def add(self, ids, contents, *, scope=None, metadatas=None):
+            for i in ids:
+                self.docs[i] = scope
+
+        def delete(self, ids, *, scope=None):
+            for i in ids:
+                self.docs.pop(i, None)
+
+        def search(self, query, *, top_k=5, candidate_pool=20, scope=None):
+            return [_Hit(i) for i, sc in self.docs.items() if sc == scope][:top_k]
+
+        def close(self):
+            pass
+
+    assert not hasattr(LegacyRetriever, "delete_exact")
+
+    m = Memory(retriever=LegacyRetriever(), store=MemoryStore(), scope=ALICE)
+    kept = m.add("保留")
+    gone = m.add("待删")
+    stale = m.add("待失效")
+
+    assert m.invalidate(stale.id) is not None
+    m.delete(gone.id)
+    assert {i.id for i in m.store.all(scope=ALICE)} == {kept.id}   # all() hides the invalidated audit record
+    assert m.rebuild_index() >= 1
+
+
+def test_memory_delete_many_drops_ids_unknown_to_store_and_bookkeeping():
+    """A physical-delete batch also issues a ranged drop for ids the store and bookkeeping no longer know, so stale index rows cannot survive deletion."""
+    retr = FakeRetriever()
+    m = Memory(retriever=retr, store=MemoryStore(), scope=ALICE)
+    live = m.add("живой")
+    retr.docs["ghost"] = ALICE                    # index row with no store row and no bookkeeping entry
+
+    m.delete_many([live.id, "ghost"])
+
+    assert m.store.all(scope=ALICE) == []
+    assert "ghost" not in retr.docs
+
+
+def test_conversation_search_global_clear_cleans_exact_bookkeeping_footprints():
+    from agentmaker.core.message import Message
+    from agentmaker.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+
+    class ScopedRetriever:
+        def __init__(self):
+            self.rows = set()
+
+        def add(self, ids, contents, *, scope=None, metadatas=None):
+            self.rows.update((scope, id_) for id_ in ids)
+
+        def delete(self, ids, *, scope=None):
+            self.rows = {
+                (stored_scope, id_)
+                for stored_scope, id_ in self.rows
+                if id_ not in ids or not all(
+                    getattr(scope, name) is None
+                    or getattr(scope, name) == getattr(stored_scope, name)
+                    for name in ("base", "user", "agent", "session", "app")
+                )
+            }
+
+        def delete_exact(self, ids, *, scope=None):
+            self.rows.difference_update((scope, id_) for id_ in ids)
+
+    retriever = ScopedRetriever()
+    sync = SyncIndexSync(retriever, bookkeeping=InMemoryBookkeeping())
+    search = ConversationSearch(SqliteSessionStore(), retriever, index_sync=sync)
+    first = Scope(user="alice", session="one")
+    second = Scope(user="bob", session="two")
+    search.append(Message("one", "user", metadata={"message_id": "same"}), scope=first)
+    search.append(Message("two", "user", metadata={"message_id": "same"}), scope=second)
+
+    search.clear(scope=first, all_scopes=True)
+
+    assert search.load(all_scopes=True) == []
+    assert retriever.rows == set()
+    assert sync.exact_scopes(scope=Scope(base="conversation")) == set()
+
+
+def test_conversation_search_serializes_append_with_clear():
+    from agentmaker.core.message import Message
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+
+    deleting = threading.Event()
+    release_delete = threading.Event()
+
+    class BlockingRetriever(FakeRetriever):
+        def add(self, ids, contents, *, scope=None, metadatas=None):
+            super().add(ids, contents, scope=scope)
+
+        def delete_exact(self, ids, *, scope=None):
+            deleting.set()
+            assert release_delete.wait(2)
+            self.delete(ids, scope=scope)
+
+    retriever = BlockingRetriever()
+    search = ConversationSearch(SqliteSessionStore(), retriever)
+    scope = Scope(user="alice", session="one")
+    search.append(Message("old", "user"), scope=scope)
+    errors = []
+
+    def clear():
+        try:
+            search.clear(scope=scope)
+        except Exception as error:
+            errors.append(error)
+
+    appended = threading.Event()
+
+    def append():
+        try:
+            search.append(Message("new", "user"), scope=scope)
+            appended.set()
+        except Exception as error:
+            errors.append(error)
+
+    clear_thread = threading.Thread(target=clear)
+    clear_thread.start()
+    assert deleting.wait(2)
+    append_thread = threading.Thread(target=append)
+    append_thread.start()
+    assert not appended.wait(0.05)
+    release_delete.set()
+    clear_thread.join(2)
+    append_thread.join(2)
+
+    assert not errors
+    messages = search.load(scope=scope)
+    assert [message.content for message in messages] == ["new"]
+    assert set(retriever.docs) == {messages[0].metadata["message_id"]}
+
+
+def test_conversation_search_close_releases_sync_bookkeeping():
+    from agentmaker.retrieval.index_sync import InMemoryBookkeeping, SyncIndexSync
+    from agentmaker.runtime import ConversationSearch, SqliteSessionStore
+
+    closed = []
+    bookkeeping = InMemoryBookkeeping()
+    bookkeeping.close = lambda: closed.append(True)
+    retriever = FakeRetriever()
+    search = ConversationSearch(
+        SqliteSessionStore(), retriever,
+        index_sync=SyncIndexSync(retriever, bookkeeping=bookkeeping),
+    )
+
+    search.close()
+    search.close()
+
+    assert closed == [True]
+
+
 def test_conversation_search_tool_runs():
     """ConversationSearchTool: wraps it as a read-only tool; run returns a readable result (empty query errors)."""
-    from agentbuilder.core.message import Message
-    from agentbuilder.runtime import ConversationSearch, ConversationSearchTool, SqliteSessionStore
-    from agentbuilder.retrieval.scope import Scope as _S
+    from agentmaker.core.message import Message
+    from agentmaker.runtime import ConversationSearch, ConversationSearchTool, SqliteSessionStore
+    from agentmaker.retrieval.scope import Scope as _S
 
     retr = FakeRetriever()
     cs = ConversationSearch(SqliteSessionStore(), retr)
@@ -608,7 +1217,7 @@ def test_smart_writer_extract_skips_non_strings():
 
 
 def test_kv_coarse_scope_reads_fail_loud():
-    """A coarse scope matching multiple rows for the same key -> get / all both fail loud (no longer silently pick an arbitrary one / collapse and lose data); an exact scope reads fine."""
+    """A coarse scope matching duplicate keys is ambiguous; an exact scope remains readable."""
     kv = KVStore()
     kv.set("location", "上海", scope=ALICE)
     kv.set("location", "北京", scope=BOB)

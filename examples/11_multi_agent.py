@@ -5,8 +5,8 @@ sub-task to a specialist. Hermetic via ScriptedLLM.
 
     uv run python examples/11_multi_agent.py
 """
-from agentbuilder import Agent, AgentTool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, AgentTool
+from agentmaker.testing import ScriptedLLM
 
 # The worker: a specialist sub-agent.
 translator = Agent("translator", ScriptedLLM(["Bonjour le monde"]))

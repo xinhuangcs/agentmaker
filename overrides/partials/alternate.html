@@ -1,0 +1,16 @@
+<!-- Language toggle, styled like the landing page's pill button: the current
+     English page shows「中文」, the current Chinese page shows "EN".
+     mkdocs-static-i18n (reconfigure_material) rewrites config.extra.alternate
+     per page, so each link already points at THIS page in the other language
+     (falling back to the English original when no translation exists). -->
+{% set is_zh = page and page.url.startswith("zh/") or config.theme.language == "zh" %}
+{% for alt in config.extra.alternate %}
+  {% if (alt.lang == "zh") != is_zh %}
+    <!-- target=_self opts out of material's instant loading: language switches must be
+         full page loads because the nav tree and search index differ per language. -->
+    <a href="{{ alt.link | url }}" class="lang-toggle" hreflang="{{ alt.lang }}" target="_self"
+       aria-label="{{ '切换到中文版' if alt.lang == 'zh' else 'Switch to English' }}">
+      {{ "中文" if alt.lang == "zh" else "EN" }}
+    </a>
+  {% endif %}
+{% endfor %}

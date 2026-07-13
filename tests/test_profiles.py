@@ -5,10 +5,13 @@ only the structural contract -- every protocol has an adapter, the structured-ou
 carry the window/default model they should -- so a fat-fingered table edit is caught instead of silently drifting.
 """
 
+import json
+from types import SimpleNamespace
+
 import pytest
 
-from agentbuilder.core.llm_clients import LLMClient, ModelInfo, _KNOWN_MODELS, _PROFILES
-from agentbuilder.core.adapters import _ADAPTERS, AnthropicAdapter, OpenAIAdapter, _StreamState
+from agentmaker.core.llm_clients import LLMClient, ModelInfo, _KNOWN_MODELS, _PROFILES
+from agentmaker.core.adapters import _ADAPTERS, AnthropicAdapter, OpenAIAdapter, _StreamState
 
 _VALID_STRUCTURED_OUTPUT = {"json_schema", "json_object", "none", "native"}
 # Profiles where the model is user-chosen and the context window is unknown (local / self-hosted / proxy / multi-model platforms)
@@ -22,7 +25,7 @@ def test_every_protocol_has_adapter():
 
 def test_register_adapter_extends_and_rejects_non_subclass():
     """register_adapter merges a third-party protocol->adapter into _ADAPTERS (must be a BaseAdapter subclass, else TypeError)."""
-    from agentbuilder.core.adapters import BaseAdapter, register_adapter
+    from agentmaker.core.adapters import BaseAdapter, register_adapter
     try:
         class _StubAdapter(BaseAdapter):
             def _ensure_client(self): ...
@@ -82,6 +85,24 @@ def test_known_models_never_shadow_a_default():
     assert not clash, f"catalog key collides with a default_model: {clash} (the default model belongs in the profile, not the catalog)"
 
 
+def test_non_openai_model_limits():
+    """Provider limits match the current first-party model contracts."""
+    assert (_PROFILES["deepseek"].context_window, _PROFILES["deepseek"].max_output_tokens) == (1_000_000, 393_216)
+    assert (_PROFILES["gemini"].context_window, _PROFILES["gemini"].max_output_tokens) == (1_048_576, 65_536)
+    assert (_PROFILES["zhipu"].context_window, _PROFILES["zhipu"].max_output_tokens) == (204_800, 131_072)
+    expected = {
+        "gemini-3.5-flash": (1_048_576, 65_536),
+        "deepseek-v4-pro": (1_000_000, 393_216),
+        "claude-sonnet-5": (1_000_000, 128_000),
+        "glm-5.2": (1_000_000, 131_072),
+        "qwen3.6-flash": (1_000_000, 32_768),
+        "kimi-k2.7-code": (262_144, None),   # Moonshot output is window minus prompt, no independent cap
+        "moonshot-v1-128k": (131_072, None),
+    }
+    assert {model: (_KNOWN_MODELS[model].context_window, _KNOWN_MODELS[model].max_output_tokens)
+            for model in expected} == expected
+
+
 # ---------- context_window resolves per-model (the profile value only holds for default_model) ----------
 
 @pytest.fixture(autouse=True)
@@ -113,7 +134,7 @@ def test_explicit_supports_fc_wins():
 
 def test_known_model_overrides_supports_fc(monkeypatch):
     """A _KNOWN_MODELS model-level override beats the provider default (a temporary entry exercises the mechanism without pinning a real model)."""
-    from agentbuilder.core import llm_clients as M
+    from agentmaker.core import llm_clients as M
     monkeypatch.setitem(M._KNOWN_MODELS, "fake-no-fc-model",
                         ModelInfo(context_window=8000, supports_function_calling=False))
     assert LLMClient("deepseek", model="fake-no-fc-model").supports_function_calling is False
@@ -145,7 +166,7 @@ class _Chunk:
 
 
 def test_stream_state_captures_usage_on_choice_bearing_chunk():
-    """Captures usage even when it rides on the last choices-bearing chunk (e.g. DeepSeek). Streaming-usage regression."""
+    """Captures usage when it rides on the final choices-bearing chunk."""
     st = _StreamState("m")
     assert st.feed(_Chunk(choices=[_Choice("你好")])) == "你好"
     st.feed(_Chunk(choices=[_Choice("", finish_reason="stop")], usage=_Usage({"total_tokens": 46})))
@@ -153,8 +174,32 @@ def test_stream_state_captures_usage_on_choice_bearing_chunk():
     assert stats.usage == {"total_tokens": 46} and stats.finish_reason == "stop"
 
 
+def test_openai_chat_preserves_reasoning_and_tool_extensions():
+    """Compatible-provider continuation fields survive normalized tool-call parsing."""
+    class _ToolCall:
+        id = "c1"
+        type = "function"
+        function = SimpleNamespace(name="lookup", arguments='{"x":1}')
+
+        def model_dump(self, **kwargs):
+            return {"id": self.id, "type": self.type,
+                    "function": {"name": "lookup", "arguments": '{"x":1}'},
+                    "extra_content": {"google": {"thought_signature": "sig"}}}
+
+    message = SimpleNamespace(content="", reasoning_content="private-reasoning",
+                              tool_calls=[_ToolCall()])
+    response = SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="tool_calls")],
+                               usage=None, model="m")
+    parsed = _openai_adapter("m")._parse_chat(response, 1)
+    assert parsed.assistant_message == {"reasoning_content": "private-reasoning"}
+    assert parsed.tool_calls[0]["extra_content"]["google"]["thought_signature"] == "sig"
+    outbound = {**parsed.assistant_message, "role": "assistant", "content": "",
+                "tool_calls": parsed.tool_calls}
+    assert _openai_adapter("m")._params([outbound], None, None, stream=False)["messages"][0] == outbound
+
+
 def test_params_injects_stream_options_only_when_streaming():
-    """Streaming injects stream_options.include_usage by default (otherwise OpenAI-protocol streaming usage is always None). Regression."""
+    """OpenAI-protocol streaming requests usage statistics by default."""
     msgs = [{"role": "user", "content": "hi"}]
     assert _openai_adapter("gpt-4.1-nano")._params(msgs, None, None, stream=True)["stream_options"] == {"include_usage": True}
     assert "stream_options" not in _openai_adapter("gpt-4.1-nano")._params(msgs, None, None, stream=False)
@@ -192,7 +237,7 @@ def test_temperature_sent_when_explicit_or_configured():
     assert _openai_adapter("gpt-4.1-nano", default_temperature=0.2)._params(msgs, None, None, stream=False)["temperature"] == 0.2  # configured default
 
 
-# ---------- Gemini thought_signature (bytes) must be JSON-safe (regression for a real-device smoke-test bug) ----------
+# ---------- Gemini thought_signature bytes must be JSON-safe ----------
 
 def _gemini_fc_response(sig):
     """Build a mock Gemini response carrying a function_call + thought_signature (no SDK dependency)."""
@@ -203,17 +248,17 @@ def _gemini_fc_response(sig):
 
 
 def _gemini_adapter():
-    from agentbuilder.core.adapters import GeminiAdapter
+    from agentmaker.core.adapters import GeminiAdapter
     return GeminiAdapter(model="gemini-x", api_key="x", base_url=None, timeout=1,
                          default_temperature=None, max_tokens_field="max_tokens", structured_output="native")
 
 
 def test_gemini_thought_signature_parsed_json_safe():
     """_parse_response converts Gemini 3's bytes thought_signature to a base64 str so tool_calls stay json.dumps-able
-    (the reducer's token estimate and checkpoint persistence both serialize, and bytes would crash). Regression (hermetic, no SDK)."""
+    for reducer token estimates and checkpoint persistence (hermetic, no SDK)."""
     import json as _json
     out = _gemini_adapter()._parse_response(_gemini_fc_response(b"\x00\x01\xff sig"), 1)
-    assert isinstance(out.tool_calls[0]["thought_signature"], str)   # no longer bytes
+    assert isinstance(out.tool_calls[0]["thought_signature"], str)
     _json.dumps(out.tool_calls)                                      # key point: serializable (reducer / checkpoint won't crash)
 
 
@@ -232,7 +277,7 @@ def test_gemini_thought_signature_roundtrip_decodes_to_bytes():
 
 def test_request_error_maps_genai_code():
     """genai's errors.APIError exposes .code (int), not .status_code; _request_error should fall back to .code and derive retryable from it."""
-    from agentbuilder.core.adapters.base import _request_error
+    from agentmaker.core.adapters.base import _request_error
 
     class _GenaiErr(Exception):                        # mimics genai APIError: has .code / .status, no .status_code
         def __init__(self, code, status):
@@ -249,7 +294,7 @@ def test_request_error_maps_genai_code():
 
 def test_request_error_ignores_non_int_code():
     """openai's .code is a string error code (e.g. invalid_api_key), not an HTTP code, so it must not be used as a status code."""
-    from agentbuilder.core.adapters.base import _request_error
+    from agentmaker.core.adapters.base import _request_error
 
     class _OpenAIStrCode(Exception):
         code = "invalid_api_key"                        # string, not int
@@ -261,7 +306,7 @@ def test_request_error_ignores_non_int_code():
 
 def test_gemini_http_options_kwargs_pure():
     """_http_options_kwargs: timeout seconds->milliseconds, base_url passed through, None entries omitted (pure function, no SDK needed)."""
-    from agentbuilder.core.adapters import GeminiAdapter
+    from agentmaker.core.adapters import GeminiAdapter
     assert GeminiAdapter._http_options_kwargs(5, "http://proxy/v1") == {"timeout": 5000, "base_url": "http://proxy/v1"}
     assert GeminiAdapter._http_options_kwargs(2.5, None) == {"timeout": 2500}
     assert GeminiAdapter._http_options_kwargs(None, None) == {}
@@ -271,7 +316,7 @@ def test_gemini_client_applies_http_options(monkeypatch):
     """Constructing genai.Client actually applies timeout (->ms) / base_url via HttpOptions. Requires google-genai, else skipped."""
     import asyncio
     genai = pytest.importorskip("google.genai")
-    from agentbuilder.core.adapters import GeminiAdapter
+    from agentmaker.core.adapters import GeminiAdapter
 
     captured: dict = {}
     monkeypatch.setattr(genai, "Client", lambda **kw: captured.update(kw) or object())
@@ -300,7 +345,7 @@ def test_gemini_noid_parallel_results_pair_by_order():
     ]
     _system, contents = ad._to_gemini(messages)
     fr_parts = [p for c in contents if c.role == "user" for p in c.parts if getattr(p, "function_response", None)]
-    assert [p.function_response.name for p in fr_parts] == ["weather_bj", "weather_sh"]   # paired by order; before the fix this was ["weather_sh","weather_sh"]
+    assert [p.function_response.name for p in fr_parts] == ["weather_bj", "weather_sh"]
 
 
 # ---------- OpenAI-compat provider attribution / generic base_url fail-loud / _close_objects / stream close ----------
@@ -319,7 +364,7 @@ def test_openai_provider_defaults_to_official_base_url(_no_generic_base_url):
 
 def test_openai_compatible_without_base_url_fails_loud(_no_generic_base_url):
     """A generic openai_compatible profile missing base_url fails loud, never silently sending to OpenAI's official endpoint (the key would leak to the wrong host)."""
-    from agentbuilder.core.exceptions import LLMConfigError
+    from agentmaker.core.exceptions import LLMConfigError
     with pytest.raises(LLMConfigError):
         LLMClient("openai_compatible", api_key="x", model="m")
 
@@ -328,7 +373,7 @@ def test_openai_adapter_error_tagged_with_real_provider():
     """The OpenAI-compatible protocol fronts many vendors; a failed call is tagged with the real provider (deepseek), not a generic openai."""
     import asyncio
     from types import SimpleNamespace
-    from agentbuilder.core.exceptions import LLMRequestError
+    from agentmaker.core.exceptions import LLMRequestError
 
     ad = OpenAIAdapter(model="deepseek-v4", api_key="x", base_url="http://x/v1", timeout=1,
                        default_temperature=None, max_tokens_field="max_tokens",
@@ -345,7 +390,7 @@ def test_openai_adapter_error_tagged_with_real_provider():
 
 def test_close_objects_preserves_user_field_named_properties():
     """_close_objects recursion: a user field literally named properties (not the properties container) must not be mistaken for a container and mutated."""
-    from agentbuilder.core.adapters.anthropic import _close_objects
+    from agentmaker.core.adapters.anthropic import _close_objects
     schema = {"type": "object", "properties": {
         "config": {"type": "object", "properties": {
             "properties": {"type": "string"}}}}}              # user field happens to be named properties; its value is a plain string sub-schema
@@ -402,6 +447,62 @@ def test_openai_stream_closed_on_early_break():
     assert fake.closed is True
 
 
+def test_openai_tool_stream_emits_reasoning_continuation_state():
+    """Streamed reasoning is accumulated into the terminal tool-turn response."""
+    import asyncio
+
+    def chunk(*, reasoning=None, call=None, finish=None):
+        delta = SimpleNamespace(content=None, reasoning_content=reasoning,
+                                tool_calls=[call] if call else None)
+        return SimpleNamespace(model="m", usage=None,
+                               choices=[SimpleNamespace(delta=delta, finish_reason=finish)])
+
+    call = SimpleNamespace(index=0, id="c1", type="function",
+                           function=SimpleNamespace(name="lookup", arguments="{}"))
+    fake = _FakeOpenAIStream([
+        chunk(reasoning="first "), chunk(reasoning="second", call=call),
+        chunk(finish="tool_calls"),
+    ])
+    ad = _openai_adapter("m")
+
+    async def _create(**kw):
+        return fake
+    ad._ensure_client = lambda: SimpleNamespace(chat=SimpleNamespace(
+        completions=SimpleNamespace(create=_create)))
+
+    async def _drive():
+        return [item async for item in ad.stream(
+            [{"role": "user", "content": "hi"}],
+            tools=[{"type": "function", "function": {"name": "lookup", "parameters": {}}}])]
+
+    terminal = asyncio.run(_drive())[-1]
+    assert terminal.reasoning_content == "first second"
+    assert terminal.assistant_message == {"reasoning_content": "first second"}
+    assert terminal.tool_calls[0]["id"] == "c1"
+
+
+def test_anthropic_tool_turn_preserves_signed_blocks_and_order():
+    """Anthropic thinking blocks round-trip unchanged while rewritten tool IDs stay aligned."""
+    blocks = [
+        SimpleNamespace(type="thinking", thinking="", signature="signed"),
+        SimpleNamespace(type="redacted_thinking", data="opaque"),
+        SimpleNamespace(type="tool_use", id="original", name="lookup", input={"x": 1}),
+    ]
+    response = SimpleNamespace(content=blocks, usage=None, stop_reason="tool_use", model="claude")
+    parsed = _anthropic_adapter("claude")._parse_message(response, 1)
+    json.dumps(parsed.assistant_message)
+    message = {**parsed.assistant_message, "role": "assistant", "content": "",
+               "tool_calls": [{**parsed.tool_calls[0], "id": "rewritten"}]}
+    _system, conversation = _anthropic_adapter("claude")._to_anthropic([
+        message, {"role": "tool", "tool_call_id": "rewritten", "content": "ok"},
+    ])
+    returned = conversation[0]["content"]
+    assert [block["type"] for block in returned] == ["thinking", "redacted_thinking", "tool_use"]
+    assert returned[0] == {"type": "thinking", "thinking": "", "signature": "signed"}
+    assert returned[1] == {"type": "redacted_thinking", "data": "opaque"}
+    assert returned[2] == {"type": "tool_use", "id": "rewritten", "name": "lookup", "input": {"x": 1}}
+
+
 class _FakeGenStream:
     """Fake async generator as returned by genai generate_content_stream: async iteration + aclose(), records whether it was closed."""
 
@@ -449,8 +550,8 @@ def test_gemini_stream_closed_on_early_break():
 def test_gemini_finish_reason_normalized_lowercase():
     """Gemini's FinishReason enum str()s to 'FinishReason.MAX_TOKENS', which won't match other vendors; _finish_reason
     lowercases the member name to 'max_tokens' so the harness's truncation set recognizes it (else Gemini length-truncation is silently treated as complete)."""
-    from agentbuilder.core.adapters.gemini import _finish_reason
-    from agentbuilder.runtime.harness import _TRUNCATION_REASONS
+    from agentmaker.core.adapters.gemini import _finish_reason
+    from agentmaker.runtime.harness import _TRUNCATION_REASONS
     assert _finish_reason(None) is None
     assert _finish_reason("STOP") == "stop"                       # non-enum (string) input falls back to lowercase
     fake_enum = type("FR", (), {"name": "MAX_TOKENS"})()          # mimics the FinishReason enum (has .name)

@@ -7,9 +7,9 @@ databases. Hermetic.
 
     uv run python examples/10_scope_isolation.py
 """
-from agentbuilder import Memory, MemoryStore, Scope
-from agentbuilder.retrieval import build_sqlite_hybrid
-from agentbuilder.testing import FakeEmbedder
+from agentmaker import Memory, MemoryStore, Scope
+from agentmaker.retrieval import build_sqlite_hybrid
+from agentmaker.testing import FakeEmbedder
 
 # One shared store + index; the only thing separating the two users is their Scope.
 store = MemoryStore()

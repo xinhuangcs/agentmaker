@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trace Detective · agentmaker</title>
+<style>
+  /* Dual theme via CSS variables: dark is the base, [data-theme=light] overrides. No purple anywhere. */
+  :root {
+    --bg: #0b0f14; --panel: #111820; --panel-2: #0e141b; --border: #1f2a36;
+    --text: #dbe4ec; --muted: #7d8d9c; --accent: #22d3ee; --accent-dim: #0e7490;
+    --blue: #3b82f6; --teal: #2dd4bf; --green: #34d399; --amber: #f59e0b; --red: #ef4444;
+    --chip-bg: #16202b; --code-bg: #0a1016; --flash: rgba(34, 211, 238, .18);
+  }
+  [data-theme="light"] {
+    --bg: #f6f8fa; --panel: #ffffff; --panel-2: #f0f3f6; --border: #d7dee5;
+    --text: #1a2733; --muted: #5b6b7a; --accent: #0891b2; --accent-dim: #0e7490;
+    --blue: #2563eb; --teal: #0d9488; --green: #059669; --amber: #b45309; --red: #dc2626;
+    --chip-bg: #eef2f5; --code-bg: #f0f3f6; --flash: rgba(8, 145, 178, .15);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  header h1 { font-size: 20px; margin: 0; letter-spacing: .3px; }
+  header h1 .mark { color: var(--accent); }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  .ghost-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px;
+    padding: 5px 10px; font-size: 12px; cursor: pointer;
+  }
+  .ghost-btn:hover { color: var(--text); border-color: var(--accent-dim); }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  textarea {
+    width: 100%; min-height: 170px; resize: vertical; background: var(--code-bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  textarea:focus { outline: none; border-color: var(--accent-dim); }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+  .btn {
+    border: 0; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: var(--chip-bg); color: var(--text); border: 1px solid var(--border);
+  }
+  .btn:hover { border-color: var(--accent-dim); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #04252c; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  select, input[type=file] { font-size: 13px; color: var(--muted); }
+  select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 8px;
+  }
+  label.inline { font-size: 12.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  #banner {
+    display: none; margin-top: 12px; border: 1px solid var(--red); color: var(--red);
+    border-radius: 8px; padding: 8px 12px; font-size: 13.5px; white-space: pre-wrap;
+  }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 6px; }
+  .chip {
+    background: var(--chip-bg); border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 12px; font-size: 12.5px; color: var(--muted);
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.err b { color: var(--red); } .chip.warn b { color: var(--amber); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 14px 0 22px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .card p { margin: 0; font-size: 14px; white-space: pre-wrap; }
+  .card.first { border-left: 3px solid var(--red); }
+  .card.cause { border-left: 3px solid var(--amber); }
+  .card.fix   { border-left: 3px solid var(--green); }
+  .verdict-row { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  .verdict {
+    font-size: 13px; font-weight: 700; border-radius: 8px; padding: 4px 10px;
+  }
+  .verdict.bad { color: var(--red); border: 1px solid var(--red); }
+  .verdict.ok  { color: var(--green); border: 1px solid var(--green); }
+  .step-link {
+    cursor: pointer; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--accent);
+    border: 1px solid var(--accent-dim); border-radius: 8px; padding: 4px 10px; background: none;
+  }
+
+  .timeline { margin-top: 8px; }
+  .step {
+    border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .step-head {
+    display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; cursor: pointer;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
+  }
+  .step-head:hover { background: var(--panel-2); }
+  .idx { color: var(--muted); min-width: 34px; }
+  .badge { border-radius: 6px; padding: 1px 8px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .b-llm  { color: var(--accent); border: 1px solid var(--accent-dim); }
+  .b-tool { color: var(--blue); border: 1px solid var(--blue); }
+  .b-ret  { color: var(--teal); border: 1px solid var(--teal); }
+  .b-ctx  { color: var(--muted); border: 1px solid var(--border); }
+  .b-deg  { color: var(--amber); border: 1px solid var(--amber); }
+  .step-sum { color: var(--text); overflow-wrap: anywhere; }
+  .step.has-error { border-left: 3px solid var(--red); }
+  .step.has-warn  { border-left: 3px solid var(--amber); }
+  .findings { padding: 0 12px 8px 56px; font-size: 12.5px; font-family: ui-monospace, Menlo, monospace; }
+  .finding.error { color: var(--red); }
+  .finding.warn { color: var(--amber); }
+  .raw { display: none; margin: 0; padding: 10px 12px; background: var(--code-bg); border-top: 1px solid var(--border);
+         font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; overflow-x: auto; }
+  .step.open .raw { display: block; }
+  @keyframes flash { 0% { background: var(--flash); } 100% { background: transparent; } }
+  .step.flash { animation: flash 1.6s ease-out 2; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  .hint code { background: var(--chip-bg); padding: 1px 6px; border-radius: 6px; font-size: 12px; }
+  section[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="mark">◆</span> Trace Detective</h1>
+    <span class="sub">agentmaker run debugger</span>
+    <span class="spacer"></span>
+    <button class="ghost-btn" id="themeBtn" title="Toggle theme">◐ theme</button>
+  </header>
+
+  <div class="panel">
+    <textarea id="traceInput" spellcheck="false"
+      placeholder='Paste a trace here: one JSON event per line, exactly as written by JsonlExporter("run.jsonl"). Or load the file below.'></textarea>
+    <div class="controls">
+      <button class="btn" id="parseBtn">Parse trace</button>
+      <button class="btn primary" id="diagnoseBtn">Diagnose with LLM</button>
+      <label class="inline">run
+        <select id="runSelect" title="Which run to diagnose"><option value="">most recent</option></select>
+      </label>
+      <label class="inline">model
+        <select id="modelSelect" title="Which LLM pays for the diagnosis"><option value="">server default</option></select>
+      </label>
+      <label class="inline">language
+        <select id="langSelect"><option value="">auto</option><option value="en">English</option><option value="zh">中文</option></select>
+      </label>
+      <label class="inline"><input type="file" id="fileInput" accept=".jsonl,.json,.txt,.log"></label>
+    </div>
+    <div id="banner"></div>
+    <div class="hint">Record a trace in your agent code with
+      <code>Agent(..., tracer=Tracer(exporters=[JsonlExporter("run.jsonl")]))</code>, then drop the file here.</div>
+  </div>
+
+  <section id="diagSection" hidden>
+    <div class="verdict-row">
+      <span class="verdict" id="verdictChip"></span>
+      <button class="step-link" id="stepLink" hidden></button>
+      <span class="chip">confidence <b id="confidence"></b></span>
+    </div>
+    <div class="cards">
+      <div class="card first"><h3>What went wrong first</h3><p id="dWrong"></p></div>
+      <div class="card cause"><h3>Root cause</h3><p id="dCause"></p></div>
+      <div class="card fix"><h3>Suggested fix</h3><p id="dFix"></p></div>
+    </div>
+  </section>
+
+  <section id="runSection" hidden>
+    <div class="chips" id="statChips"></div>
+    <div class="timeline" id="timeline"></div>
+  </section>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = { runs: [], parsedText: null };
+
+/* ---------- theme: follow the system by default, button flips it ---------- */
+const prefersLight = matchMedia("(prefers-color-scheme: light)");
+let theme = prefersLight.matches ? "light" : "dark";
+function applyTheme() { document.documentElement.dataset.theme = theme; }
+$("themeBtn").onclick = () => { theme = theme === "dark" ? "light" : "dark"; applyTheme(); };
+applyTheme();
+
+/* ---------- helpers ---------- */
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function banner(msg) { const b = $("banner"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
+function fmt(n) { return (n ?? 0).toLocaleString("en-US"); }
+function badgeClass(type) {
+  if (type === "llm_call") return "b-llm";
+  if (type === "tool_call") return "b-tool";
+  if (type === "memory_search" || type === "rag_retrieve") return "b-ret";
+  if (type.startsWith("context_")) return "b-ctx";
+  return "b-deg";  /* degradations, index sync, unknown */
+}
+async function api(path, body) {
+  const resp = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.detail || ("request failed: HTTP " + resp.status));
+  return data;
+}
+
+/* ---------- parse + render timeline ---------- */
+function selectedRun() {
+  const id = $("runSelect").value;
+  if (!state.runs.length) return null;
+  if (id === "") return state.runs[state.runs.length - 1];       /* server default: most recent */
+  return state.runs.find(r => (r.run_id ?? "__none__") === id) || null;
+}
+
+function renderRunSelect() {
+  const sel = $("runSelect");
+  sel.innerHTML = "";
+  state.runs.forEach((r, i) => {
+    const opt = document.createElement("option");
+    opt.value = r.run_id ?? "__none__";
+    const name = r.run_id ? "run " + r.run_id.slice(0, 8) : "(no run id)";
+    opt.textContent = `${name} · ${r.stats.steps} steps · ${r.stats.errors} err`;
+    if (i === state.runs.length - 1) opt.selected = true;        /* most recent preselected */
+    sel.appendChild(opt);
+  });
+}
+
+function renderRun(run) {
+  $("runSection").hidden = false;
+  const s = run.stats;
+  $("statChips").innerHTML =
+    `<span class="chip">run <b>${esc(run.run_id ? run.run_id.slice(0, 12) : "(no run id)")}</b></span>` +
+    `<span class="chip">steps <b>${fmt(s.steps)}</b></span>` +
+    `<span class="chip">llm calls <b>${fmt(s.llm_calls)}</b></span>` +
+    `<span class="chip">tool calls <b>${fmt(s.tool_calls)}</b></span>` +
+    `<span class="chip">tokens <b>${fmt(s.total_tokens)}</b></span>` +
+    `<span class="chip">latency <b>${fmt(s.total_latency_ms)} ms</b></span>` +
+    `<span class="chip err">errors <b>${fmt(s.errors)}</b></span>` +
+    `<span class="chip warn">warnings <b>${fmt(s.warnings)}</b></span>`;
+  $("timeline").innerHTML = run.steps.map(step => {
+    const sev = step.findings.some(f => f.severity === "error") ? "has-error"
+              : step.findings.length ? "has-warn" : "";
+    const findings = step.findings.length
+      ? `<div class="findings">` + step.findings.map(f =>
+          `<div class="finding ${esc(f.severity)}">!! ${esc(f.severity)} ${esc(f.code)}: ${esc(f.detail)}</div>`).join("") + `</div>`
+      : "";
+    return `<div class="step ${sev}" id="step-${step.index}">
+      <div class="step-head" onclick="this.parentElement.classList.toggle('open')">
+        <span class="idx">#${step.index}</span>
+        <span class="badge ${badgeClass(step.type)}">${esc(step.type)}</span>
+        <span class="step-sum">${esc(step.summary)}</span>
+      </div>${findings}
+      <pre class="raw">${esc(JSON.stringify(step.event, null, 2))}</pre>
+    </div>`;
+  }).join("");
+}
+
+async function parseTrace() {
+  banner("");
+  const text = $("traceInput").value;
+  if (!text.trim()) { banner("Paste a trace first: one JSON event per line."); return false; }
+  try {
+    const data = await api("/api/parse", { trace: text });
+    state.runs = data.runs;
+    state.parsedText = text;
+    renderRunSelect();
+    renderRun(selectedRun());
+    return true;
+  } catch (e) { banner(e.message); return false; }
+}
+
+/* ---------- diagnose ---------- */
+async function diagnoseTrace() {
+  banner("");
+  $("diagSection").hidden = true;
+  if (state.parsedText !== $("traceInput").value) {              /* auto-parse when input changed */
+    if (!await parseTrace()) return;
+  }
+  const run = selectedRun();
+  const btn = $("diagnoseBtn");
+  btn.disabled = true; const label = btn.textContent; btn.textContent = "Analyzing…";
+  try {
+    const data = await api("/api/diagnose", {
+      trace: state.parsedText, run_id: run ? run.run_id : null,
+      language: $("langSelect").value || null,   /* auto = follow the server's language pack */
+      provider: $("modelSelect").value || null,  /* server default when unset */
+    });
+    renderDiagnosis(data.diagnosis);
+  } catch (e) { banner(e.message); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+
+function renderDiagnosis(d) {
+  $("diagSection").hidden = false;
+  const chip = $("verdictChip");
+  chip.textContent = d.healthy ? "✓ run looks healthy" : "✗ failure found";
+  chip.className = "verdict " + (d.healthy ? "ok" : "bad");
+  $("confidence").textContent = d.confidence;
+  const link = $("stepLink");
+  if (d.first_bad_step !== null && d.first_bad_step !== undefined) {
+    link.hidden = false;
+    link.textContent = "first bad step: #" + d.first_bad_step;
+    link.onclick = () => {
+      const el = $("step-" + d.first_bad_step);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+    };
+  } else { link.hidden = true; }
+  $("dWrong").textContent = d.what_went_wrong;
+  $("dCause").textContent = d.root_cause;
+  $("dFix").textContent = d.suggested_fix;
+  $("diagSection").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ---------- providers: which vendors the server environment can diagnose with ---------- */
+async function loadProviders() {
+  try {
+    const resp = await fetch("/api/providers");
+    if (!resp.ok) return;                                        /* listing is best-effort decoration */
+    const data = await resp.json();
+    const sel = $("modelSelect");
+    sel.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = data.default
+      ? `server default · ${data.default.provider}/${data.default.model}`
+      : "server default (none)";
+    sel.appendChild(def);
+    data.available.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.provider;
+      opt.textContent = `${p.provider} · ${p.default_model}`;
+      sel.appendChild(opt);
+    });
+  } catch (e) { /* offline preview etc.: keep the static "server default" option */ }
+}
+loadProviders();
+
+/* ---------- wiring ---------- */
+$("parseBtn").onclick = parseTrace;
+$("diagnoseBtn").onclick = diagnoseTrace;
+$("runSelect").onchange = () => { const r = selectedRun(); if (r) renderRun(r); };
+$("fileInput").onchange = async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $("traceInput").value = await file.text();
+  parseTrace();
+};
+</script>
+</body>
+</html>

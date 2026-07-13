@@ -11,12 +11,12 @@ import zlib
 
 import pytest
 
-from agentbuilder import (LLMClient, LLMConfigError, LLMError, Message, Scope, SqliteSessionStore,
+from agentmaker import (LLMClient, LLMConfigError, LLMError, Message, Scope, SqliteSessionStore,
                           content_text, image_part_from_bytes, image_part_from_file,
                           image_part_from_url, messages_have_images, text_part)
-from agentbuilder.core.adapters.anthropic import AnthropicAdapter
-from agentbuilder.core.adapters.openai_compat import _to_openai_messages
-from agentbuilder.core.multimodal import IMAGE_TOKEN_ESTIMATE, content_tokens
+from agentmaker.core.adapters.anthropic import AnthropicAdapter
+from agentmaker.core.adapters.openai_compat import _to_openai_messages
+from agentmaker.core.multimodal import IMAGE_TOKEN_ESTIMATE, content_tokens
 
 RED_PIXEL = base64.b64encode(b"fake-png-bytes").decode("ascii")
 
@@ -94,7 +94,7 @@ def test_anthropic_translation_builds_source_blocks():
 def test_gemini_translation_inline_only():
     """Gemini protocol: base64 parts become inline Parts; URL parts fail loud (API takes no remote URLs)."""
     genai_types = pytest.importorskip("google.genai").types
-    from agentbuilder.core.adapters.gemini import _to_gemini_parts
+    from agentmaker.core.adapters.gemini import _to_gemini_parts
 
     parts = _to_gemini_parts(PARTS, genai_types)
     assert parts[0].text == "what color is this?"

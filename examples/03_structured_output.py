@@ -8,8 +8,8 @@ returns the JSON directly).
 """
 from pydantic import BaseModel
 
-from agentbuilder import Agent
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent
+from agentmaker.testing import ScriptedLLM
 
 
 class Person(BaseModel):

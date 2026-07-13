@@ -1,7 +1,7 @@
 # 安装
 
 ```bash
-pip install agentbuilder
+pip install agentmaker
 ```
 
 需要 **Python 3.12+**。
@@ -22,9 +22,9 @@ pip install agentbuilder
 只安装你需要的能力。每个后端都是惰性导入的，因此未安装的附加项在导入时不会产生任何开销。
 
 ```bash
-pip install "agentbuilder[anthropic]"        # one extra
-pip install "agentbuilder[anthropic,rag]"    # several
-pip install "agentbuilder[all]"              # everything below
+pip install "agentmaker[anthropic]"        # one extra
+pip install "agentmaker[anthropic,rag]"    # several
+pip install "agentmaker[all]"              # everything below
 ```
 
 | 附加项 | 新增能力 |
@@ -53,6 +53,35 @@ pip install "agentbuilder[all]"              # everything below
 | `zhipu` | `ZHIPUAI_API_KEY` |
 | `modelscope` | `MODELSCOPE_API_KEY` |
 
+运行前先在 shell 里设置变量：
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."          # macOS / Linux
+```
+
+```powershell
+$env:DEEPSEEK_API_KEY = "sk-..."          # Windows PowerShell
+```
+
+更喜欢用 `.env` 文件？`.env` 里的变量名就用上表中的名字——`.env` 只是设置同一批环境变量的另一种方式：
+
+```text
+# .env
+DEEPSEEK_API_KEY=sk-...
+```
+
+agentmaker 有意不自己读取 `.env`（加载环境文件是应用层的决定），但标准的 [python-dotenv](https://pypi.org/project/python-dotenv/) 照常可用：
+
+```python
+from dotenv import load_dotenv
+load_dotenv()                             # reads .env from the working directory
+
+from agentmaker import Agent, LLMClient
+agent = Agent("assistant", LLMClient("deepseek"))
+```
+
+记得把 `.env` 排除在版本控制之外（加进 `.gitignore`）。
+
 本地引擎（`ollama`、`vllm`、`sglang`）无需密钥。完整的厂商列表以及 `provider:model` 语法，见 [LLM 客户端与厂商](guides/llm-clients.md)。
 
 ## 使用 uv 安装
@@ -60,6 +89,6 @@ pip install "agentbuilder[all]"              # everything below
 如果你使用 [uv](https://docs.astral.sh/uv/)：
 
 ```bash
-uv add agentbuilder
-uv add "agentbuilder[all]"
+uv add agentmaker
+uv add "agentmaker[all]"
 ```

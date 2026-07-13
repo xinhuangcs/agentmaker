@@ -1,37 +1,25 @@
-"""Regression net for agentbuilder.agents / agentbuilder.multi_agent fixes (hermetic: stub LLM / tools, no key, offline).
-
-Locks in these fixes:
-① resume finalization records first, clears the checkpoint after (an output-guardrail trip / persist failure doesn't lose the checkpoint);
-② AgentTool normalizes a child Agent's return into a ToolResponse (Interrupt -> error, non-string textualized, str(resp) doesn't crash);
-③ ChatStrategy's text-protocol _find_calls uses raw_decode (a { } ] inside a string value no longer drops the whole call);
-④ the ReAct Action regex accepts hyphen / dot tool names (common with MCP / CLI);
-⑤ build_agent: strategy='react' must have tools (errors at construction, not deferred to runtime);
-⑥ build_agent: max_turns distinguishes None from a number and errors on <=0 (doesn't treat 0 as unset and silently fall back);
-⑦ _checkpoint clears stale pending in passing, leaving none in the checkpoint;
-⑧ PlanAgent no longer treats an empty plan as the single step ['[]'], falling back to "the original question as a single step";
-plus end-to-end ReAct / Plan HITL resume, verifying fixes ① and ⑦ don't regress on the real resume path.
-"""
+"""Hermetic behavior tests for agents, workflows, delegation, checkpointing, and streaming."""
 
 import asyncio
 
 import pytest
 
-from agentbuilder.agents.base import BaseAgent
-from agentbuilder.agents.agent import Agent as UnifiedAgent
-from agentbuilder.agents.workflows import PlanAgent, ReflectionAgent
-from agentbuilder.agents.spec import AgentSpec, _turns, build_agent
-from agentbuilder.core.exceptions import GuardrailTripwireError, RunLimitExceeded, SessionError
-from agentbuilder.core.llm_clients import LLMClient
-from agentbuilder.core.llm_response import LLMResponse
-from agentbuilder.runtime.execution import CheckpointStore, ExecutionState, RunPolicy
-from agentbuilder.runtime.harness import Harness
-from agentbuilder.runtime.execution.run_context import new_run_id, reset_run, start_run
-from agentbuilder.runtime.hitl import Interrupt, Interrupt as _Interrupt, PendingAction, PendingAction as _PendingAction
-from agentbuilder.agents.multi_agent import AgentTool
-from agentbuilder.retrieval import Scope
-from agentbuilder.tools import CalculatorTool, ToolRegistry
-from agentbuilder.tools.base import Tool, ToolParameter
-from agentbuilder.tools.response import ToolResponse
+from agentmaker.agents.base import BaseAgent
+from agentmaker.agents.agent import Agent as UnifiedAgent
+from agentmaker.agents.workflows import PlanAgent, ReflectionAgent
+from agentmaker.agents.spec import AgentSpec, _turns, build_agent
+from agentmaker.core.exceptions import GuardrailTripwireError, LLMResponseError, RunLimitExceeded, SessionError
+from agentmaker.core.llm_clients import LLMClient
+from agentmaker.core.llm_response import LLMResponse
+from agentmaker.runtime.execution import CheckpointStore, ExecutionState, RunPolicy
+from agentmaker.runtime.harness import Harness
+from agentmaker.runtime.execution.run_context import new_run_id, reset_run, start_run
+from agentmaker.runtime.hitl import Interrupt, Interrupt as _Interrupt, PendingAction, PendingAction as _PendingAction
+from agentmaker.agents.multi_agent import AgentTool
+from agentmaker.retrieval import Scope
+from agentmaker.tools import CalculatorTool, ToolRegistry
+from agentmaker.tools.base import Tool, ToolParameter
+from agentmaker.tools.response import ToolResponse
 
 
 # ---------- Test doubles (offline, no key needed) ----------
@@ -110,7 +98,7 @@ def _dummy_llm():
 # ---------- ⑧ PlanAgent plan parsing (line-by-line fallback salvage when structured parsing fails) ----------
 
 def test_parse_plan_empty_list():
-    """An empty list [] parses to empty (including when wrapped in a code fence), no longer degrading to ['[]']."""
+    """An empty list parses to empty, including inside a code fence."""
     assert PlanAgent._parse_plan("[]") == []
     assert PlanAgent._parse_plan("```python\n[]\n```") == []
 
@@ -172,29 +160,41 @@ def test_turns_helper():
             _turns(bad, 3)
 
 
-def test_spec_max_turns_zero_raises():
-    """build_agent: max_turns=0 errors rather than silently falling back to the default."""
-    with pytest.raises(ValueError):
-        build_agent(AgentSpec(name="c", strategy="chat", model=_dummy_llm(), max_turns=0))
-
-
 def test_spec_max_turns_none_and_value():
-    """max_turns=None uses the paradigm default (chat=10); a positive value is passed through. chat now maps to the unified-loop Agent (max_turns attribute)."""
+    """max_turns=None uses the chat default; a positive value is passed through."""
     assert build_agent(AgentSpec(name="c", strategy="chat", model=_dummy_llm())).max_turns == 10
     assert build_agent(AgentSpec(name="c", strategy="chat", model=_dummy_llm(), max_turns=2)).max_turns == 2
 
 
 def test_build_agent_plan_max_turns_maps_to_executor():
-    """build_agent(plan, max_turns=N) maps to the max_turns of PlanAgent's internal executor (no longer silently ignored)."""
+    """build_agent(plan, max_turns=N) configures the PlanAgent executor limit."""
     agent = build_agent(AgentSpec(name="p", strategy="plan", model=_dummy_llm(), max_turns=7))
     assert agent._executor.max_turns == 7
+
+
+def test_build_agent_accepts_duck_typed_test_double():
+    """A declaratively-built agent runs hermetically with a duck-typed client, matching the imperative Agent(...) path — no API key needed."""
+    agent = build_agent(AgentSpec(name="d", strategy="chat", model=ScriptLLM(["42"])))
+    assert isinstance(agent, UnifiedAgent)
+    assert agent.run("q").final_output == "42"
+
+
+def test_build_agent_validates_spec_before_resolving_llm(monkeypatch):
+    """A config mistake fails loud with its own ValueError even when the model cannot be resolved (no key), instead of being masked by an LLM-resolution error."""
+    for key in list(__import__("os").environ):
+        if key.endswith("_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
+    with pytest.raises(ValueError, match="max_turns"):
+        build_agent(AgentSpec(name="c", strategy="chat", model="deepseek", max_turns=0))
+    with pytest.raises(ValueError, match="compactor"):
+        build_agent(AgentSpec(name="p", strategy="plan", model="deepseek", compactor=object()))
 
 
 # ---------- Naming unification: PlanAgent signature alignment + Harness structural check + AgentSpec.model provider:model ----------
 
 def test_plan_agent_signature_aligned():
     """PlanAgent's 3rd positional arg is system_prompt (aligned with Agent/ReflectionAgent), and tool_registry becomes keyword-only."""
-    p = PlanAgent("p", _dummy_llm(), "你是助手")                  # 3rd position -> system_prompt, no longer treated as the registry
+    p = PlanAgent("p", _dummy_llm(), "你是助手")                  # The third position is system_prompt.
     assert p.system_prompt == "你是助手"
     p2 = PlanAgent("p", _dummy_llm(), tool_registry=_reg(CalculatorTool()))
     assert p2.harness.tool_registry is not None
@@ -212,7 +212,7 @@ def test_harness_rejects_non_registry_tool_registry():
 def test_resolve_llm_provider_model(monkeypatch):
     """AgentSpec.model accepts 'provider:model': splits provider + model; a bare provider name still works; illegal types fail loud."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")                  # LLMClient construction validates the key; inject a fake key under hermetic
-    from agentbuilder.agents.spec import _resolve_llm
+    from agentmaker.agents.spec import _resolve_llm
     a = _resolve_llm("deepseek:deepseek-v4-pro")
     assert a.provider == "deepseek" and a.model == "deepseek-v4-pro"
     b = _resolve_llm("deepseek")                                  # bare provider name -> default model
@@ -233,13 +233,13 @@ def test_build_agent_with_provider_model_string(monkeypatch):
 
 def test_unknown_provider_error_hints_provider_model_format():
     """An unknown provider errors with a hint about the 'provider:model' format (guidance for new users passing a model name)."""
-    from agentbuilder.core.exceptions import LLMConfigError
+    from agentmaker.core.exceptions import LLMConfigError
     with pytest.raises(LLMConfigError) as e:
         LLMClient("gpt-5")
     assert "provider:model" in str(e.value)
 
 
-# ---------- A nested run's run_policy is ignored -> observable warning (no longer silent) ----------
+# ---------- Nested run-policy warning ----------
 
 def test_nested_run_policy_ignored_warns(caplog):
     """With an outer run context already present, an inner start_run carrying run_policy inherits the outer (returns None) and warns."""
@@ -261,7 +261,7 @@ def test_top_level_run_policy_does_not_warn(caplog):
     assert not any("run_policy is ignored" in r.message for r in caplog.records)
 
 
-# ---------- _make_harness auto-injects _harness_hooks / prompts (eliminates the hidden contract) ----------
+# ---------- _make_harness auto-injects _harness_hooks and prompts ----------
 
 def test_make_harness_injects_hooks_and_prompts():
     """The three paradigms assemble their own harness via _make_harness: injecting self.prompts (shared reference) + self._harness_hooks (not self.hooks)."""
@@ -294,8 +294,8 @@ def test_update_prompts_propagates_to_harness_after_make():
 
 # ---------- ① resume finalization order / ⑦ clearing pending (unit) ----------
 
-def test_finish_resume_records_before_clear():
-    """resume finalization records first (including output guardrails), then clears the checkpoint: on a guardrail trip the checkpoint is kept and can be resumed again."""
+def test_finish_resume_clears_checkpoint_on_output_guardrail():
+    """A deterministically guardrail-blocked output has no resumable result, so its completed marker is cleared."""
     cp = MemCheckpoint()
     scope = Scope(user="u")
     cp.save("{}", scope=scope)
@@ -304,7 +304,18 @@ def test_finish_resume_records_before_clear():
     agent.output_guardrails = [TripGuard()]
     with pytest.raises(GuardrailTripwireError):
         asyncio.run(agent._finish_resume("out", ExecutionState(messages=[], input_text="q"), scope))
-    assert cp.load(scope=scope) is not None     # checkpoint not cleared (before the fix it would clear first and be lost after a trip)
+    assert cp.load(scope=scope) is None
+
+
+def test_run_clears_checkpoint_on_output_guardrail():
+    """The normal run path also removes its completed marker when the output is blocked."""
+    cp = MemCheckpoint()
+    scope = Scope(user="u")
+    agent = UnifiedAgent("a", ScriptLLM(["out"]), checkpoint_store=cp,
+                         output_guardrails=[TripGuard()])
+    with pytest.raises(GuardrailTripwireError):
+        agent.run("q", scope=scope)
+    assert cp.load(scope=scope) is None
 
 
 def test_checkpoint_clears_stale_pending():
@@ -361,7 +372,7 @@ def test_plan_hitl_partial_decision_reprompts_on_delegation_path():
 
     out = agent.run("处理", scope=scope, verbose=False)
     assert out.interrupted and {p.call_id for p in out.interrupt.pendings} == {"a", "b"}   # one suspend, two awaiting approval
-    out2 = agent.resume({"a": True}, scope=scope, verbose=False)   # partial decision: approve only a (the old implementation raised TypeError here)
+    out2 = agent.resume({"a": True}, scope=scope, verbose=False)
     assert out2.interrupted and {p.call_id for p in out2.interrupt.pendings} == {"b"}       # b re-suspends awaiting approval
     assert agent.resume({"b": True}, scope=scope, verbose=False).final_output == "全部完成"
 
@@ -375,7 +386,7 @@ def test_agenttool_textualizes_string():
 
 
 def test_agenttool_interrupt_becomes_error():
-    """A child Agent suspending returns an Interrupt -> converted to an error result; text is a string, str(resp) no longer TypeErrors."""
+    """A child-agent Interrupt becomes a textual ToolResponse error."""
     resp = AgentTool(StubAgent("w", Interrupt(PendingAction("danger", {}, "c1"), None))).run({"task": "x"})
     assert resp.status == "error"
     assert isinstance(resp.text, str)
@@ -383,7 +394,7 @@ def test_agenttool_interrupt_becomes_error():
 
 
 def test_agenttool_scope_injection():
-    """Passing scope at construction -> the delegated child Agent uses it; default None -> the child Agent uses its own default scope (backward-compatible)."""
+    """An explicit delegation scope wins; None uses the child Agent's default scope."""
     s = StubAgent("w", "ok")
     AgentTool(s, scope=Scope(user="alice")).run({"task": "x"})
     assert s.seen_scope == Scope(user="alice")
@@ -429,7 +440,7 @@ class _StreamLLM:
 def test_harness_stream_counts_call_even_when_consumer_breaks_early():
     """When the consumer closes the stream early, record_llm still counts in finally - otherwise the RunPolicy limit could be bypassed repeatedly.
     The harness is fully async: aio.iter_sync synchronously drives astream_llm (the real facade path for sync consumption)."""
-    from agentbuilder.core.aio import iter_sync
+    from agentmaker.core.aio import iter_sync
     h = Harness(_StreamLLM())
     policy = RunPolicy(max_llm_calls=1)
     tok = start_run("rid", policy=policy)
@@ -497,8 +508,8 @@ def test_memory_injection_plan_and_executor_passthrough():
     assert a._executor.harness.context_builder is not None and a._executor.harness.tool_retriever is not None
 
 
-def test_reflection_pure_self_critique_unchanged():
-    """Reflection without tools: pure self-critique (draft->critique->refine->critique(pass)), behavior unchanged."""
+def test_reflection_pure_self_critique():
+    """Reflection without tools follows draft -> critique -> refine -> passing critique."""
     out = ReflectionAgent("r", ScriptLLM(["初稿", "批评一", "改进稿", "GOOD ENOUGH"]), max_turns=2).run("t", verbose=False)
     assert out.final_output == "改进稿"
 
@@ -563,14 +574,13 @@ def test_nested_executor_checkpoint_survives_parent_commit_crash():
     cp.crash_scope, cp.armed = agent.scope, True              # make the parent's commit (save to the parent scope) crash
     with pytest.raises(RuntimeError):
         agent.resume(True, verbose=False)
-    assert cp.load(scope=crit_scope) is not None              # ★ after the crash the child checkpoint is still there (old code would have the critic self-clear it to None -> unrecoverable)
+    assert cp.load(scope=crit_scope) is not None
     cp.armed = False                                          # disarm the crash
     assert isinstance(agent.resume(None, verbose=False).final_output, str)  # crash-recoverable, doesn't raise SessionError
 
 
 def test_build_agent_accepts_injection_and_tools_on_all_paradigms():
-    """build_agent's new boundaries: reflection accepts tools/context; react/plan accept the full set; compactor still fails loud;
-    the use_function_calling field is removed (fc is the unified loop's only mechanism) - setting it TypeErrors at AgentSpec construction."""
+    """build_agent exposes tools/context by strategy and rejects unsupported AgentSpec fields."""
     refl = build_agent(AgentSpec(name="r", strategy="reflection", model=_dummy_llm(),
                                  tools=[CalculatorTool()], context_builder=StubBuilder(), sources=[object()]))
     assert isinstance(refl, ReflectionAgent) and refl._critic.tool_registry is not None
@@ -591,8 +601,8 @@ def test_build_agent_accepts_injection_and_tools_on_all_paradigms():
 
 def _tool_rag_registry():
     """A registry of three fake tools (shared by the Tool-RAG tests)."""
-    from agentbuilder.tools.base import ToolParameter
-    from agentbuilder.tools.registry import ToolRegistry
+    from agentmaker.tools.base import ToolParameter
+    from agentmaker.tools.registry import ToolRegistry
     reg = ToolRegistry()
     for name, desc in [("calc", "算数"), ("mail", "发邮件"), ("ask_user", "向用户提问澄清")]:
         reg.register_function(lambda p: "ok", name, desc, [ToolParameter("x", "string", "参数")])
@@ -613,7 +623,7 @@ class _HitsRetriever:
 
 def test_tool_retriever_always_include_and_on_empty():
     """always_include stays pinned first; zero hits defaults to falling back to the full catalog (never zero tools); on_empty can switch the strategy."""
-    from agentbuilder.tools.tool_retriever import ToolRetriever
+    from agentmaker.tools.tool_retriever import ToolRetriever
     reg = _tool_rag_registry()
     tr = ToolRetriever(reg, _HitsRetriever(["calc"]), always_include=("ask_user",))
     assert tr.retrieve("算一下") == ["ask_user", "calc"]            # pinned first + hits following
@@ -629,17 +639,17 @@ def test_tool_retriever_always_include_and_on_empty():
 
 def test_tool_retriever_selector_seam():
     """selector truncation seam: once injected, the callback decides which hits to take (e.g. a score threshold); the default remains a fixed top-k."""
-    from agentbuilder.tools.tool_retriever import ToolRetriever
+    from agentmaker.tools.tool_retriever import ToolRetriever
     reg = _tool_rag_registry()
     tr = ToolRetriever(reg, _HitsRetriever(["calc", "mail"]), selector=lambda q, hits: [hits[0].id])
     assert tr.retrieve("发邮件并算账") == ["calc"]                   # the callback only lets the top hit through
 
 
-def test_tool_retrieval_config_in_agentbuilder_config():
-    """ToolRetrievalConfig as AgentbuilderConfig's 9th sub-config: from_dict restore + from_config assembly."""
-    from agentbuilder import AgentbuilderConfig, ToolRetrievalConfig
-    from agentbuilder.tools.tool_retriever import ToolRetriever
-    kc = AgentbuilderConfig.from_dict({"tool_retrieval": {"top_k": 3, "always_include": ["ask_user"], "on_empty": "none"}})
+def test_tool_retrieval_config_in_agentmaker_config():
+    """ToolRetrievalConfig as AgentmakerConfig's 9th sub-config: from_dict restore + from_config assembly."""
+    from agentmaker import AgentmakerConfig, ToolRetrievalConfig
+    from agentmaker.tools.tool_retriever import ToolRetriever
+    kc = AgentmakerConfig.from_dict({"tool_retrieval": {"top_k": 3, "always_include": ["ask_user"], "on_empty": "none"}})
     assert kc.tool_retrieval == ToolRetrievalConfig(top_k=3, always_include=("ask_user",), on_empty="none")
     tr = ToolRetriever.from_config(kc, _tool_rag_registry(), _HitsRetriever(["calc"]))
     assert tr.top_k == 3 and tr.always_include == ("ask_user",) and tr.on_empty == "none"
@@ -647,7 +657,7 @@ def test_tool_retrieval_config_in_agentbuilder_config():
 
 def test_tool_search_tool_returns_discovered():
     """ToolSearchTool: returns catalog text + data.discovered tool names (excluding itself)."""
-    from agentbuilder.tools.tool_retriever import ToolRetriever, ToolSearchTool
+    from agentmaker.tools.tool_retriever import ToolRetriever, ToolSearchTool
     reg = _tool_rag_registry()
     tr = ToolRetriever(reg, _HitsRetriever(["mail", "calc"]))
     tool = ToolSearchTool(tr, top_k=2)
@@ -658,10 +668,10 @@ def test_tool_search_tool_returns_discovered():
 
 def test_fc_loop_expands_tools_from_discovery():
     """Mid-run expansion of the available set on the fc path: after tool_search discovers a new tool, the next LLM call's tools include its schema."""
-    from agentbuilder.tools.base import ToolParameter
-    from agentbuilder.tools.registry import ToolRegistry
-    from agentbuilder.tools.response import ToolResponse
-    from agentbuilder.tools.base import Tool
+    from agentmaker.tools.base import ToolParameter
+    from agentmaker.tools.registry import ToolRegistry
+    from agentmaker.tools.response import ToolResponse
+    from agentmaker.tools.base import Tool
 
     class _Searcher(Tool):
         def __init__(self):
@@ -699,9 +709,9 @@ def test_fc_loop_expands_tools_from_discovery():
 
 def test_discovered_tools_survive_hitl_resume():
     """The discovered list is persisted with the checkpoint: turn1 discovers -> turn2 suspends on a high-risk tool -> after resume the model still sees the discovered tools' schemas."""
-    from agentbuilder.tools.base import Tool, ToolParameter
-    from agentbuilder.tools.registry import ToolRegistry
-    from agentbuilder.tools.response import ToolResponse
+    from agentmaker.tools.base import Tool, ToolParameter
+    from agentmaker.tools.registry import ToolRegistry
+    from agentmaker.tools.response import ToolResponse
 
     class _Searcher(Tool):
         def __init__(self):
@@ -757,7 +767,7 @@ class _NoFcLLM:
 
 def test_agent_with_tools_rejects_no_fc_model():
     """Tools present + a model that declares no fc support -> fail loud at construction (rather than tools silently failing at runtime)."""
-    from agentbuilder.tools import ToolRegistry
+    from agentmaker.tools import ToolRegistry
     reg = ToolRegistry()
     reg.register_function(lambda p: "ok", "noop", "无操作工具")
     with pytest.raises(ValueError, match="function calling"):
@@ -797,15 +807,15 @@ def test_init_subclass_requires_run_or_arun():
 
 
 def test_derive_scope_suffix_and_none_fallback():
-    """_derive_scope: appends "::"+suffix to the agent dimension (byte-for-byte identical to the old _exec_scope/_crit_scope); None falls back to an empty Scope."""
-    from agentbuilder.retrieval import Scope
+    """_derive_scope appends the suffix to agent and accepts a None parent scope."""
+    from agentmaker.retrieval import Scope
     assert BaseAgent._derive_scope(Scope(agent="A"), "plan_exec").agent == "A::plan_exec"
     assert BaseAgent._derive_scope(None, "reflect_crit").agent == "::reflect_crit"
 
 
 def test_child_decision_none_when_missing():
     """When the decision table has no decision for a pending call (parent resume(None) crash recovery) -> pass None so the child re-suspends;
-    with decisions -> collect a multi-decision dict keyed by call_id. Fixes the old semantic flaw where "no decision" was read as False=reject, silently swallowing the awaiting action."""
+    with decisions -> collect a multi-decision dict keyed by call_id."""
     st = ExecutionState(messages=[], input_text="t")
     assert BaseAgent._child_decision(st) is None                 # no pending
     st.pending = [_PendingAction("tool", {}, "c1")]
@@ -827,7 +837,7 @@ def test_child_decision_none_when_missing():
 def test_absorb_child_order_contract():
     """_absorb_child completion-branch ordering contract: awaiting is reset first -> on_complete records -> parent _checkpoint -> child cleanup
     ("parent commit before child cleanup"); suspend branch: awaiting=True + repackaged as a parent-scope Interrupt (doesn't leak the child scope)."""
-    from agentbuilder.retrieval import Scope
+    from agentmaker.retrieval import Scope
 
     events = []
 
@@ -844,7 +854,7 @@ def test_absorb_child_order_contract():
             events.append(("parent_clear", scope))
 
     class _Child:
-        async def clear_checkpoint(self, scope):       # _absorb_child now awaits child.clear_checkpoint
+        async def clear_checkpoint(self, scope):
             events.append(("child_clear", scope))
 
     parent_scope = Scope(agent="P")
@@ -856,8 +866,8 @@ def test_absorb_child_order_contract():
     def on_complete(r):
         events.append(("record", r, st.meta["awaiting"]))        # awaiting must already be reset to False when recording
 
-    from agentbuilder.agents.result import RunResult
-    # _absorb_child now consumes the child's RunResult (on_complete gets final_output)
+    from agentmaker.agents.result import RunResult
+    # on_complete receives the child's final output.
     assert asyncio.run(p._absorb_child(RunResult(final_output="结果", status="completed"), st, parent_scope,
                                        child=_Child(), child_scope=child_scope, on_complete=on_complete)) is None
     assert events == [("record", "结果", False), ("parent_save", parent_scope), ("child_clear", child_scope)]
@@ -872,7 +882,7 @@ def test_absorb_child_order_contract():
     assert st.meta["awaiting"] is True
 
 
-# ---------- Unified-loop Agent (agentbuilder/agents/agent.py) ----------
+# ---------- Unified-loop Agent (agentmaker/agents/agent.py) ----------
 
 
 def test_unified_agent_plain_chat_and_history():
@@ -885,11 +895,11 @@ def test_unified_agent_plain_chat_and_history():
 def test_run_result_envelope_fields():
     """RunResult envelope: the completed state has final_output/status/new_messages/run_id/usage all present, and __str__ equals the final output text;
     the suspended state has interrupted=True + an interrupt field, and __str__ isn't a bare None."""
-    from agentbuilder import RunResult
+    from agentmaker import RunResult
     a = UnifiedAgent("u", ScriptLLM(["你好！"]))
     r = a.run("hi")
     assert isinstance(r, RunResult) and r.status == "completed" and r.interrupted is False
-    assert r.final_output == "你好！" and str(r) == "你好！"           # __str__ soft migration: used as a string it still yields the answer
+    assert r.final_output == "你好！" and str(r) == "你好！"
     assert [m.role for m in r.new_messages] == ["user", "assistant"]   # this turn's new messages
     assert r.run_id and r.usage.llm_calls == 1                         # run_id + usage snapshot
 
@@ -925,7 +935,7 @@ def test_unified_agent_exhausted_text():
 
 def test_unified_agent_hitl_suspend_resume_and_callid_rewrite():
     """A high-risk tool suspends -> resume(True) continues and executes; the next turn the server reuses the same call_id -> it collides with the decision table and is rewritten,
-    re-suspending for approval (rather than riding the old approval and executing directly); after resume(False) rejects and feeds back, the model reroutes and answers."""
+    re-suspending for approval; after resume(False), the model receives the rejection and reroutes."""
     reg = ToolRegistry()
     reg.register(DangerTool())
 
@@ -941,6 +951,40 @@ def test_unified_agent_hitl_suspend_resume_and_callid_rewrite():
     assert out2.interrupted and out2.interrupt.pending.call_id != "call_0"
     assert out2.interrupt.pending.call_id.startswith("call_0#")        # rewrite rule: original id + turn suffix
     assert a.resume(False).final_output == "完成"                          # reject -> feed back and reroute -> answer
+
+
+def test_callid_rewrite_avoids_suffix_shaped_ids_in_same_turn():
+    """A rewritten approval ID cannot collide with a provider-supplied suffix-shaped ID."""
+    reg = ToolRegistry()
+    reg.register(DangerTool())
+
+    def call(call_id):
+        return {"id": call_id, "type": "function",
+                "function": {"name": "danger", "arguments": '{"x": "f"}'}}
+
+    llm = ScriptLLM([
+        LLMResponse(tool_calls=[call("call_0")]),
+        LLMResponse(tool_calls=[call("call_0"), call("call_0#t2-0")]),
+        "完成",
+    ])
+    agent = UnifiedAgent("u", llm, tool_registry=reg, checkpoint_store=MemCheckpoint())
+    assert agent.run("删").interrupted
+    resumed = agent.resume(True)
+    ids = {pending.call_id for pending in resumed.interrupt.pendings}
+    assert ids == {"call_0#t2-0", "call_0#t2-0-1"}
+    assert agent.resume({call_id: False for call_id in ids}).final_output == "完成"
+
+
+def test_callid_rewrite_skips_adversarial_historical_suffixes():
+    """Repeated suffix-shaped decision keys cannot force a rewritten ID onto an existing approval."""
+    agent = UnifiedAgent("u", ScriptLLM([]), tools=[DangerTool()])
+    state = ExecutionState(
+        messages=[], input_text="删", remaining=8,
+        decisions={"call_0": True, "call_0#t2-0": True, "call_0#t2-0-1": False},
+    )
+    call = {"id": "call_0", "type": "function",
+            "function": {"name": "danger", "arguments": '{"x": "f"}'}}
+    assert agent._unique_calls([call], state)[0]["id"] == "call_0#t2-0-2"
 
 
 # ---------- Re-running on a scope with a pending suspend doesn't silently overwrite ----------
@@ -969,6 +1013,29 @@ def test_run_on_pending_scope_discard_policy():
     assert a.run("换个话题").final_output == "新话题答案"        # discard: old pending dropped, new run completes normally
 
 
+def test_stream_during_pending_preserves_suspended_approval():
+    """Streaming writes no checkpoints, so it neither blocks on nor discards a pending approval; the suspended turn stays resumable."""
+    class StreamScriptLLM(ScriptLLM):
+        async def stream(self, messages, **kwargs):
+            r = self._scripted[self.calls]
+            self.calls += 1
+            resp = r if isinstance(r, LLMResponse) else LLMResponse(content=r)
+            if resp.content:
+                yield resp.content
+            yield resp
+
+    reg = _reg(DangerTool())
+    llm = StreamScriptLLM([_danger_call(), "闲聊答案", "完成"])
+    agent = UnifiedAgent("u", llm, tool_registry=reg, checkpoint_store=MemCheckpoint())
+    assert agent.run("删").interrupted
+
+    async def drain():
+        return [piece async for piece in agent.astream_run("换个话题")]
+
+    assert "".join(asyncio.run(drain())) == "闲聊答案"     # streams normally while an approval is pending
+    assert agent.resume(False).final_output == "完成"      # the pending approval survived the stream
+
+
 # ---------- resume decision type check + approval-gate defense in depth ----------
 
 def test_resume_rejects_non_bool_decision():
@@ -982,12 +1049,25 @@ def test_resume_rejects_non_bool_decision():
 
 def test_approval_gate_requires_explicit_true():
     """Approval-gate defense in depth: a truthy-but-not-True value in the decision table (dirty data that bypassed the type check) does not release the high-risk action; it re-suspends."""
-    from agentbuilder.runtime.hitl import ApprovalRequired
+    from agentmaker.runtime.hitl import ApprovalRequired
     h = Harness(ScriptLLM([]), tool_registry=_reg(DangerTool()))
     with pytest.raises(ApprovalRequired):
         h._approval_gate("danger", {"x": "f"}, "c1", {"c1": "approved"})   # truthy but not True -> re-suspend
     assert h._approval_gate("danger", {"x": "f"}, "c1", {"c1": True}) is None      # only an explicit True releases it
     assert h._approval_gate("danger", {"x": "f"}, "c1", {"c1": False}).status == "error"  # False rejects
+
+
+@pytest.mark.parametrize("call_ids, message", [([None], "empty tool call ID"),
+                                                 (["same", "same"], "appears more than once")])
+def test_hitl_fails_closed_on_unusable_call_ids(call_ids, message):
+    """HITL never creates ambiguous approval credentials for empty or same-batch duplicate IDs."""
+    calls = [{"id": call_id, "type": "function",
+              "function": {"name": "danger", "arguments": '{"x": "f"}'}}
+             for call_id in call_ids]
+    agent = UnifiedAgent("u", ScriptLLM([LLMResponse(tool_calls=calls)]),
+                         tool_registry=_reg(DangerTool()), checkpoint_store=MemCheckpoint())
+    with pytest.raises(LLMResponseError, match=message):
+        agent.run("删")
 
 
 def test_parallel_independent_runs_each_suspend_and_resume():
@@ -1039,8 +1119,8 @@ def test_unified_agent_stream_history_semantics():
 
 
 def test_unified_agent_stream_run_context_carries_scope():
-    """The streaming run context carries scope (fixes the old ChatStrategy.stream_run drift of not passing scope)."""
-    from agentbuilder.runtime.execution.run_context import current_scope
+    """The streaming run context carries scope."""
+    from agentmaker.runtime.execution.run_context import current_scope
     seen = {}
 
     class _SLLM:
@@ -1082,17 +1162,16 @@ def test_unified_agent_output_schema():
     assert UnifiedAgent("u", ScriptLLM(['{"x": 7}'])).run("给我 x", output_schema=Out).final_output.x == 7
 
 
-# ---------- Checkpoint format version: "discard on mismatch" ----------
+# ---------- Checkpoint format validation ----------
 
 def test_incompatible_checkpoint_version_discarded():
-    """resume hits an incompatible old checkpoint (a genuinely old checkpoint lacking the "v" field) -> auto-clears + SessionError so the user restarts."""
+    """resume clears a versionless checkpoint and asks the user to restart."""
     import json as _json
     cp = MemCheckpoint()
     scope = Scope(user="u")
-    # simulate an old checkpoint persisted "before the framework upgrade": hand-build JSON missing the "v" field (replaces the retired _LEGACY_META_KEYS blacklist path)
-    old_raw = _json.dumps({"messages": [{"role": "user", "content": "x"}], "input_text": "x",
+    versionless = _json.dumps({"messages": [{"role": "user", "content": "x"}], "input_text": "x",
                            "remaining": 1, "decisions": {}, "meta": {}, "pending": None})
-    cp.save(old_raw, scope=scope)
+    cp.save(versionless, scope=scope)
     agent = UnifiedAgent("u", ScriptLLM([]), tool_registry=_reg(DangerTool()), checkpoint_store=cp)
     with pytest.raises(SessionError, match="incompatible"):
         agent.resume(True, scope=scope)
@@ -1100,19 +1179,19 @@ def test_incompatible_checkpoint_version_discarded():
 
 
 def test_new_run_clears_incompatible_pending_checkpoint():
-    """The suspended-state gate meets an incompatible old checkpoint -> doesn't block a new run (clears the unresumable old checkpoint, then allows it)."""
+    """The pending gate clears a versionless checkpoint and permits the run."""
     import json as _json
     cp = MemCheckpoint()
     scope = Scope(user="u")
-    old_raw = _json.dumps({"messages": [], "input_text": "x", "remaining": 1, "decisions": {}, "meta": {},
+    versionless = _json.dumps({"messages": [], "input_text": "x", "remaining": 1, "decisions": {}, "meta": {},
                            "pending": {"tool_name": "danger", "arguments": {"x": "a"}, "call_id": "c1"}})
-    cp.save(old_raw, scope=scope)
+    cp.save(versionless, scope=scope)
     agent = UnifiedAgent("u", ScriptLLM(["答"]), checkpoint_store=cp)   # on_pending defaults to error
-    assert agent.run("新任务", scope=scope).final_output == "答"        # old checkpoint cleared, new run allowed, no raise
+    assert agent.run("新任务", scope=scope).final_output == "答"
 
 
 def test_unified_agent_checkpoint_json_roundtrip_resume():
-    """New checkpoint JSON literal replay -> resume(True) continues: the serialization format and the resume path are consistent (pending_calls/turn_start unchanged)."""
+    """A checkpoint JSON round trip preserves the resume state."""
     cp = MemCheckpoint()
     scope = Scope(user="u")
     danger = LLMResponse(content="", model="s", tool_calls=[
@@ -1129,10 +1208,10 @@ def test_unified_agent_checkpoint_json_roundtrip_resume():
 # ---------- Reflection pass-signal word-boundary matching (not substring in) ----------
 
 def test_reflection_passed_uses_word_boundary():
-    """The pass signal uses word-boundary matching: appearing as part of a longer word (e.g. GOOD ENOUGH within GOOD ENOUGHNESS) is no longer misjudged as passing."""
-    from agentbuilder.agents.workflows.reflection import ReflectionAgent
-    from agentbuilder.prompts import DEFAULT_PROMPTS
-    from agentbuilder.prompts.packs import chinese_registry
+    """The pass signal requires word boundaries and ignores occurrences inside longer words."""
+    from agentmaker.agents.workflows.reflection import ReflectionAgent
+    from agentmaker.prompts import DEFAULT_PROMPTS
+    from agentmaker.prompts.packs import chinese_registry
 
     class _FakeSelf:
         pass
@@ -1164,7 +1243,7 @@ def test_child_agents_default_on_pending_discard():
 
 def test_plan_clear_checkpoint_cascades_to_executor():
     """A Plan step suspends -> clear_checkpoint(scope) cascades to clear the child executor's checkpoint -> a subsequent run doesn't hit SessionError and can re-run."""
-    from agentbuilder.core.aio import run_sync
+    from agentmaker.core.aio import run_sync
     reg = ToolRegistry()
     reg.register(DangerTool())
     cp = MemCheckpoint()
@@ -1188,7 +1267,7 @@ def test_plan_clear_checkpoint_cascades_to_executor():
     assert cp.load(scope=scope) is None
     assert cp.load(scope=exec_scope) is None                      # ★ cascade-cleared the child checkpoint (otherwise an orphan deadlocks)
 
-    assert agent.run("换个安全办法", scope=scope).final_output == "全部完成"  # a fresh run no longer hits SessionError
+    assert agent.run("换个安全办法", scope=scope).final_output == "全部完成"
 
 
 def test_agenttool_clears_child_checkpoint_on_interrupt():
@@ -1331,7 +1410,7 @@ def test_resume_dict_partial_reprompts_remaining():
 
 
 def test_interrupt_backcompat_and_pending_list_roundtrip():
-    """Interrupt.pending returns the first (backward-compatible) + a single construction is normalized to a list; ExecutionState pending list to_json/from_json round-trip."""
+    """Interrupt.pending returns the first item, single construction normalizes to a list, and pending round-trips through JSON."""
     p1, p2 = PendingAction("t1", {"x": 1}, "c1"), PendingAction("t2", {}, "c2")
     it = Interrupt([p1, p2], None)
     assert it.pending is p1 and it.pendings == [p1, p2]
@@ -1393,7 +1472,7 @@ def test_resume_no_duplicate_history_on_crash_between_record_and_clear():
 def test_concurrent_same_scope_run_serialized():
     """Two concurrent runs on the same scope both suspend -> the per-scope lock serializes them: one suspends, the other hits _guard_pending and raises SessionError, and the suspended state isn't overwritten."""
     import asyncio as _aio
-    from agentbuilder.core.aio import run_sync
+    from agentmaker.core.aio import run_sync
 
     class AlwaysDanger:
         provider = "stub"
@@ -1421,6 +1500,42 @@ def test_concurrent_same_scope_run_serialized():
     assert len(interrupts) == 1 and len(errors) == 1    # one suspends, one is gated (the suspended state isn't overwritten)
     st = ExecutionState.from_json(cp.load(scope=scope))
     assert st.pending and st.pending[0].tool_name == "danger"   # the checkpoint holds only one suspended state
+
+
+def test_concurrent_same_scope_sync_threads_fail_fast_cross_loop():
+    """Same-scope sync calls on different resident loops reject the contender instead of hanging."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from agentmaker.core.aio import run_sync
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingLLM:
+        provider = "stub"
+        context_window = None
+        supports_function_calling = True
+
+        async def chat(self, messages, **kwargs):
+            started.set()
+            await asyncio.to_thread(release.wait)
+            return LLMResponse(content="done")
+
+    agent = UnifiedAgent("a", BlockingLLM())
+    scope = Scope(user="u")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(agent.run, "A", scope=scope)
+        assert started.wait(timeout=1)
+        async def limited_second_call():
+            return await asyncio.wait_for(agent.arun("B", scope=scope), timeout=0.2)
+
+        second = pool.submit(run_sync, limited_second_call())
+        try:
+            with pytest.raises(SessionError, match="another event loop"):
+                second.result(timeout=1)
+        finally:
+            release.set()
+        assert first.result(timeout=1).final_output == "done"
 
 
 # ---------- Streaming output-guardrail buffer mode ----------
@@ -1473,7 +1588,7 @@ def test_stream_buffer_mode_passes_through_when_ok():
 
 def test_invalid_tool_args_emits_trace():
     """A tool-argument parse failure (invalid JSON) still emits a tool_call trace (status=invalid_args) - the audit sees this invalid call."""
-    from agentbuilder.runtime.observability.tracer import Tracer
+    from agentmaker.runtime.observability.tracer import Tracer
     tracer = Tracer()
     reg = ToolRegistry()
     reg.register(CalculatorTool())
@@ -1483,3 +1598,40 @@ def test_invalid_tool_args_emits_trace():
     assert agent.run("go").final_output == "完成"
     inv = [e for e in tracer.events if e.get("type") == "tool_call" and e.get("status") == "invalid_args"]
     assert len(inv) == 1 and inv[0]["tool"] == "calculator"
+
+
+def test_tool_loop_forwards_adapter_assistant_state():
+    """The next model call receives opaque continuation state from the tool-calling response."""
+    class _CaptureLLM(ScriptLLM):
+        def __init__(self, scripted):
+            super().__init__(scripted)
+            self.seen = []
+
+        async def chat(self, messages, tools=None, **kwargs):
+            self.seen.append([dict(message) for message in messages])
+            return await super().chat(messages, tools=tools, **kwargs)
+
+    call = LLMResponse(
+        tool_calls=[{"id": "c1", "type": "function",
+                     "function": {"name": "calculator", "arguments": '{"expression":"1+1"}'}}],
+        assistant_message={"reasoning_content": "keep-me"},
+    )
+    llm = _CaptureLLM([call, "2"])
+    agent = UnifiedAgent("a", llm, tools=[CalculatorTool()])
+    assert agent.run("calculate").final_output == "2"
+    assistant = next(message for message in llm.seen[1] if message.get("role") == "assistant")
+    assert assistant["reasoning_content"] == "keep-me"
+    assert assistant["tool_calls"][0]["id"] == "c1"
+
+
+def test_non_object_tool_args_are_rejected_as_invalid():
+    """A JSON array is valid JSON but not a valid function-argument object."""
+    from agentmaker.runtime.observability.tracer import Tracer
+    tracer = Tracer()
+    reg = ToolRegistry()
+    reg.register(CalculatorTool())
+    bad = LLMResponse(content="", tool_calls=[
+        {"id": "c1", "type": "function", "function": {"name": "calculator", "arguments": "[]"}}])
+    agent = UnifiedAgent("a", ScriptLLM([bad, "完成"]), tool_registry=reg, tracer=tracer)
+    assert agent.run("go").final_output == "完成"
+    assert any(e.get("status") == "invalid_args" for e in tracer.events)

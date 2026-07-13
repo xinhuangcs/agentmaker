@@ -2,11 +2,11 @@
 
 工具（tool）就是你的 Agent 能调用的函数。一个工具对外暴露名称、描述和带类型的参数列表；模型通过 **function calling**（函数调用，即模型输出一个结构化请求，要求以给定参数运行某个具名工具的机制）来调用它，框架随后运行该工具并把结果回传给模型。本指南涵盖：定义工具（一行式的 `@tool` 装饰器或 `Tool` 子类）、用 `ToolResponse` 返回结果、用 `ToolRegistry` 归集工具、内置工具、权限与确认关卡、接入外部 MCP 服务器，以及用 Tool-RAG 在运行时从大量工具中动态挑选。
 
-本页所有内容都运行在 [Agent](agents.md) 循环之上。完整可运行示例见 [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentbuilder/blob/main/examples/02_tools_and_registry.py)：
+本页所有内容都运行在 [Agent](agents.md) 循环之上。完整可运行示例见 [`examples/02_tools_and_registry.py`](https://github.com/xinhuangcs/agentmaker/blob/main/examples/02_tools_and_registry.py)：
 
 ```python
-from agentbuilder import Agent, CalculatorTool, ToolRegistry, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, CalculatorTool, ToolRegistry, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
@@ -36,7 +36,7 @@ print(agent.run("Compute (3 + 4) * 5").final_output)
 
 ## 用 `@tool` 定义工具
 
-给一个带类型注解的函数加上 `@tool`，它就变成一个 `Tool` 对象（不再是普通函数），可以直接传给 `Agent(tools=[...])` 或 `registry.register(...)`。模型看到的 schema（描述工具入参结构的 JSON 定义）会自动推断出来：
+用 `@tool` 装饰带类型注解的函数后，对应名称是一个 `Tool` 对象，可以直接传给 `Agent(tools=[...])` 或 `registry.register(...)`。模型看到的 schema（描述工具入参结构的 JSON 定义）会自动推断出来：
 
 - **参数名、类型、默认值和是否必填**来自函数签名。Python 类型映射到 JSON Schema 类型：`str` 到 `string`，`int` 到 `integer`，`float` 到 `number`，`bool` 到 `boolean`，`list`/`tuple` 到 `array`，`dict` 到 `object`。
 - **工具描述**取自 docstring 的第一段。
@@ -46,7 +46,7 @@ print(agent.run("Compute (3 + 4) * 5").final_output)
 
 ```python
 from typing import Annotated
-from agentbuilder import tool
+from agentmaker import tool
 
 
 @tool
@@ -68,7 +68,9 @@ def delete_file(path: str) -> str:
 
 - `requires_confirmation`：对高风险动作（写入、删除、发送请求）设为 `True`，这样该调用在执行前会先经过确认关卡。
 - `external_content`：当结果是来自外部来源的内容时设为 `True`，框架会先用一层防注入护栏（anti-injection guardrail）把它包起来，再回传给模型。
-- `supports_parallel`：对只读、并发安全的工具设为 `True`，它就可以在同一轮里与其他可并行的调用并发执行。
+- `supports_parallel`：对只读、并发安全的工具设为 `True`，它就可以在同一轮里与其他可并行的调用并发执行。配置了任一 LLM、工具或 token 数值上限的运行会改为串行执行工具调用。
+
+只有当当前运行没有精确的 `max_tool_calls` 上限时，框架才会做并行批处理。一旦设置 `RunPolicy.max_tool_calls`，符合并行条件的调用也会串行执行，使框架能在每次真实执行前做精确的准入检查。
 
 你也可以用 `@tool(name=..., description=...)` 显式命名工具；不指定时，名称默认取函数名。
 
@@ -85,7 +87,7 @@ def delete_file(path: str) -> str:
 当你需要保存状态、自定义 schema，或表达装饰器无法表达的逻辑时，直接继承 `Tool`。实现 `get_parameters()`（返回一个 `ToolParameter` 列表）和 `run()`（返回一个 `ToolResponse`）：
 
 ```python
-from agentbuilder import Tool, ToolParameter, ToolResponse
+from agentmaker import Tool, ToolParameter, ToolResponse
 
 
 class ReverseTool(Tool):
@@ -147,7 +149,7 @@ ToolResponse.error("query must not be empty")  # status="error"
 `ToolRegistry` 按名称保存一个 Agent 可调用的工具。可以用 `register` 逐个注册，也可以用 `register_all` 批量注册：
 
 ```python
-from agentbuilder import ToolRegistry, CalculatorTool, SearchTool
+from agentmaker import ToolRegistry, CalculatorTool, SearchTool
 
 registry = ToolRegistry()
 registry.register(CalculatorTool())
@@ -192,7 +194,7 @@ agent = Agent("assistant", llm, tool_registry=registry)               # explicit
 安全地求解数学表达式：把表达式解析成抽象语法树（AST），只对白名单内的运算符求值，因此没有 `eval`、也不存在任意代码执行。它支持 `+ - * / // % **`、一元正负号，以及函数 `sqrt`、`abs`、`round`、`log`、`sin`、`cos` 和常量 `pi`、`e`。它只有一个参数 `expression`，构造时无需任何参数（与所有内置工具一样，它接受一个可选的 `prompts=`，用于本地化其面向用户的字符串）：
 
 ```python
-from agentbuilder import CalculatorTool
+from agentmaker import CalculatorTool
 
 registry.register(CalculatorTool())   # tool name: "calculator"
 ```
@@ -202,7 +204,7 @@ registry.register(CalculatorTool())   # tool name: "calculator"
 带自动多源回退的网页搜索：它先试 Tavily，再试 DuckDuckGo，然后 Brave，最后 SerpAPI；只要某个源没装对应库、没配置 key 或调用失败，就切到下一个源。只有全部失败时才返回错误。key 从环境变量读取（`TAVILY_API_KEY`、`BRAVE_API_KEY`、`SERPAPI_API_KEY`）；DuckDuckGo 不需要 key。它只有一个参数 `query`。
 
 ```python
-from agentbuilder import SearchTool
+from agentmaker import SearchTool
 
 registry.register(SearchTool(max_results=5))   # tool name: "search"
 ```
@@ -211,39 +213,41 @@ registry.register(SearchTool(max_results=5))   # tool name: "search"
 
 ### `CLITool`
 
-把「运行一条白名单内的本地命令」封装成一个工具。由于命令行本身高风险，安全是其核心设计：它默认拒绝（deny-by-default，只有你列出的程序才被允许），从不使用 `shell=True`（参数用 `shlex` 分词，未加引号的 shell 运算符会被拒绝），针对高风险标志施加一道危险参数关卡，只传入一个最小环境（`PATH`、`HOME`、`LANG`），使得 `.env` 里的密钥绝不会通过命令输出泄漏回来，并强制超时加输出截断。它被标记为 `requires_confirmation = True`。它的工具名是 `shell`，只有一个参数 `command`。
+把「运行一条白名单内的本地命令」封装成一个工具。由于命令行本身高风险，安全是其核心设计：它默认拒绝（deny-by-default，只有你列出的程序才被允许），构造时把这些程序解析并固定为绝对路径，从不使用 `shell=True`（参数用 `shlex` 分词，未加引号的 shell 运算符会被拒绝），针对解释器、Git、网络和文件系统的高风险标志施加危险参数关卡，并只传入最小环境（`PATH`、`HOME`、`LANG`）。超时、取消、输出过量或后代进程持续占用输出管道时，会终止并回收启动时捕获的进程组；输出在读取时即受硬上限约束。CLI 输出按外部内容处理，回传模型前会加入防注入定界。进程组生命周期契约依赖 POSIX 的 `setsid` / `killpg`，因此 `CLITool` 支持的是 POSIX 主机；Windows 命令执行请使用应用自有的沙箱工具。它被标记为 `requires_confirmation = True`。它的工具名是 `shell`，只有一个参数 `command`。
 
 ```python
-from agentbuilder import CLITool
+from agentmaker import CLITool
 
 registry.register(CLITool(allowed_commands=["git", "ls", "grep"], timeout=10.0, max_output_chars=4000))
 ```
 
-你可以用 `arg_policy` 回调覆盖危险参数关卡，用 `env` 覆盖子进程环境。
+你可以用 `arg_policy` 回调覆盖危险参数关卡，用 `env` 覆盖子进程环境。白名单和参数拒绝规则并不是操作系统沙箱；Git 等命令仍可能执行 hook 或应用/用户配置，因此确认回调必须审查完整命令，高风险部署还应增加容器或平台沙箱。
 
 ### `NotesTool`
 
-让 Agent 在一个受限目录内读取和追加笔记文件，从而跨会话保留进度、计划和决策。所有读写都被限制在你构造时给定的 `root` 之内：任何在路径解析后逃逸出去的路径（`..`、绝对路径，或经由符号链接逃逸）都会被拒绝。它的工具名是 `notes`，参数为 `action`（`read` 或 `append`）、`path`（相对于 `root`）和 `content`（用于 `append`）。
+让 Agent 在一个受限目录内读取和追加笔记文件，从而跨会话保留进度、计划和决策。构造时会以 `0700` 创建尚不存在的 `root`；已有 root 必须是真实目录、归当前用户所有，且不得对同组或其他用户开放任何权限位（例如 `0700`）。绝对路径与 `..` 会被拒绝；笔记路径的每一级父目录和最终文件都不跟随符号链接；非普通文件及带额外硬链接的文件也会被拒绝。它的工具名是 `notes`，参数为 `action`（`read` 或 `append`）、`path`（相对于 `root`）和 `content`（用于 `append`）。
 
 ```python
-from agentbuilder import NotesTool
+from agentmaker import NotesTool
 
 registry.register(NotesTool(root="./agent_notes"))
 ```
 
-`NotesTool` 采用按动作确认：`append` 会写入磁盘、需要确认，而 `read` 是只读的、无需确认提示即可运行。
+`NotesTool` 要求 POSIX 环境提供目录相对文件操作与 `O_NOFOLLOW`；缺少这些能力时，构造会抛出 `OSError`。追加操作会尝试取得非阻塞的逐文件 `flock`，协作实例会串行完成 `max_file_bytes` 检查与写入；锁竞争会返回工具错误，而不会无限等待。该锁是建议锁；其它写入者仍需由应用负责协调。
+
+`NotesTool` 采用按动作确认：`append` 会写入磁盘、需要确认，而 `read` 是只读的、无需确认提示即可运行。成功的 `read` 会被标成外部内容，因此模型看到笔记正文前，框架会先用防注入定界符包裹它；`append` 返回的本地确认信息不会被标成外部内容。
 
 ## 高风险动作：确认关卡
 
 被标记 `requires_confirmation` 的工具（以及像 `NotesTool` 那样按动作各自决定的工具）必须先通过一个确认回调才能运行。该回调的签名是 `(tool, parameters) -> bool`；只有返回 `True` 时工具才会运行。把它作为 `confirm` 传给 Agent：
 
 ```python
-from agentbuilder import Agent, cli_confirm
+from agentmaker import Agent, cli_confirm
 
 agent = Agent("assistant", llm, tools=[CLITool(allowed_commands=["ls"])], confirm=cli_confirm)
 ```
 
-`cli_confirm` 是内置的命令行提示（在 stdin 上问一个 `y/n` 问题）。如果你不传 `confirm`，高风险调用会默认被安全地拒绝（模型收到一条可读的错误，而不是让动作在未确认的情况下执行）。对于服务端或异步的审批流程，请使用 human-in-the-loop（HITL，人在回路，即让一次运行暂停、等人来批准或修改某个待定动作的模式）；见 [护栏与 HITL](guardrails-and-hitl.md)。
+`cli_confirm` 是内置的命令行提示（在 stdin 上问一个 `y/n` 问题）。如果你不传 `confirm`，高风险调用会默认被安全地拒绝（模型收到一条可读的错误，而不是让动作在未确认的情况下执行）。对于服务端或异步的审批流程，请使用 human-in-the-loop（HITL，人在回路，即让一次运行暂停、等人来批准或修改某个待定动作的模式）；见 [护栏与人在回路](guardrails-and-hitl.md)。
 
 ## 工具权限
 
@@ -258,7 +262,7 @@ agent = Agent("assistant", llm, tools=[CLITool(allowed_commands=["ls"])], confir
 `allow=None` 表示该维度不启用允许列表（「不设限制」）；`allow=[]` 表示一个空的允许列表，拒绝一切。把一个 `ToolPermissions` 作为 `permissions` 传给 Agent：
 
 ```python
-from agentbuilder import Agent, ToolPermissions
+from agentmaker import Agent, ToolPermissions
 
 permissions = ToolPermissions(allow_origins={"builtin"}, deny={"shell"})
 agent = Agent("assistant", llm, tool_registry=registry, permissions=permissions)
@@ -268,12 +272,12 @@ agent = Agent("assistant", llm, tool_registry=registry, permissions=permissions)
 
 ## MCP 集成
 
-MCP（Model Context Protocol，模型上下文协议，Anthropic 提出的、用于向模型暴露工具的开放标准，有时被称为「AI 的 USB-C」）让你可以连接一个发布了一组工具的服务器，并把其中每个工具适配成一个 agentbuilder 的 `Tool`。`MCPClient` 负责管理连接并列出工具；每个工具会变成一个 `MCPTool`，像其他工具一样注册。`mcp` 是一个可选依赖（`uv add mcp`），惰性导入。
+MCP（Model Context Protocol，模型上下文协议，Anthropic 提出的、用于向模型暴露工具的开放标准，有时被称为「AI 的 USB-C」）让你可以连接一个发布了一组工具的服务器，并把其中每个工具适配成 agentmaker 的 `Tool`。`MCPClient` 负责管理连接并列出工具；每个工具会变成一个 `MCPTool`，像其他工具一样注册。用 `uv add "agentmaker[mcp]"` 安装这个惰性导入的集成。
 
 支持两种传输方式。用 `async with` 管理连接生命周期，并在该代码块存活期间调用这些工具：
 
 ```python
-from agentbuilder import MCPClient, ToolRegistry
+from agentmaker import MCPClient, ToolRegistry
 
 registry = ToolRegistry()
 
@@ -296,7 +300,11 @@ async with MCPClient(url="https://mcp.example.com/mcp", namespace="calendar", au
 - `namespace` 是**必填**的，也是信任根。每个工具的展示名会变成 `"{namespace}_{original name}"`，其来源被盖章为 `"mcp:{namespace}"`。namespace 由你自己选定，绝不从服务器自报的名称派生（那是攻击者可控的）。这同时也避免了两个服务器各自暴露一个 `search` 工具时的冲突。
 - 对加载进来的 MCP 工具，`requires_confirmation` 默认为 `True`，因为远程工具不可信；只有在你审查过该服务器之后，才把它降为 `False`。
 - `MCPTool` 设置了 `external_content = True`，所以结果会被防注入护栏包裹。
-- 每个工具定义都会得到一个指纹（对其远程名称、描述和输入 schema 计算的 sha256）。传 `expected_fingerprints` 把它们钉死：如果服务器之后偷换了某个工具的描述或 schema，`load_tools` 会拒绝加载。
+- 合法的根 `inputSchema` 会原样保留其结构，同时用于模型暴露和本地参数校验，包括本地 `$ref`/`$defs` 与根约束。过大、过深或引用外部地址的 schema 会在使用前被拒绝。
+- 每个工具定义都会得到一个指纹（对其远程名称、描述和输入 schema 计算的 sha256）。`expected_fingerprints` 是精确的 `{展示名称: sha256}` 固定集合：指纹不符、服务器返回集合中未列出的工具，或服务器漏掉集合中已固定的工具，都会使 `load_tools` 失败。
+- `max_tools` 会拒绝过大的远程工具目录；`max_result_chars` 限制保留文本。结构化内容在相关的字节、深度与节点预算内复制，无法容纳时替换为 `{"truncated": true}`；预算检查前不会调用无界序列化器。
+- 远程 URL 默认必须使用 HTTPS；回环地址可使用明文 HTTP，非回环 HTTP 必须显式传入 `allow_insecure_http=True`。URL 中嵌入的凭据会被拒绝，描述和结果中的 ASCII 控制字符与 Unicode 格式控制符会被移除（emoji 与复杂文字所需的连接符和软连字符会保留）。
+- `timeout` 同时覆盖初始化、`list_tools` 和每次 `call_tool`；设为 `None` 会禁用超时，只适合由应用自行提供取消策略的场景。
 
 用 `on_conflict="skip"`（而不是在第一次名称冲突时报错）来注册，可以避免一个重复项就中断整个加载循环。
 
@@ -305,7 +313,7 @@ async with MCPClient(url="https://mcp.example.com/mcp", namespace="calendar", au
 一旦一个 Agent 有很多工具，把每个工具的完整 schema 都塞进 prompt 既昂贵又会拉低准确率。Tool-RAG（RAG 即 retrieval-augmented generation，检索增强生成，只检索相关条目而不是把一切都发过去）只为当前输入检索出最相关的工具，并只展开那一个子集。`ToolRetriever` 把每个工具的名称、描述和参数名索引进一个共享的检索器，并返回最匹配的若干项：
 
 ```python
-from agentbuilder import ToolRetriever
+from agentmaker import ToolRetriever
 
 # `retriever` is a HybridRetriever; see the Retrieval & RAG guide for how to build one.
 tool_retriever = ToolRetriever(registry, retriever, top_k=8, always_include=("tool_search",))
@@ -330,7 +338,7 @@ agent = Agent("assistant", llm, tool_registry=registry, tool_retriever=tool_retr
 一次性预选有个盲区：在多步任务里，第二步需要哪个工具，可能取决于第一步的输出。`ToolSearchTool` 补上了这个缺口，它把工具检索本身做成一个模型可以在运行途中调用的工具。它返回一份匹配工具的目录外加一个 `discovered` 列表，循环会把这些工具并入本次运行剩余部分的可用工具集：
 
 ```python
-from agentbuilder import ToolSearchTool
+from agentmaker import ToolSearchTool
 
 registry.register(ToolSearchTool(tool_retriever, top_k=5))   # tool name: "tool_search"
 ```

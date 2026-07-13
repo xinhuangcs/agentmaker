@@ -6,8 +6,8 @@ CLITool, NotesTool, ...) and your own @tool functions register the same way. Her
 
     uv run python examples/02_tools_and_registry.py
 """
-from agentbuilder import Agent, CalculatorTool, ToolRegistry, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, CalculatorTool, ToolRegistry, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool

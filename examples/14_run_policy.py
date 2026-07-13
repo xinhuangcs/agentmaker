@@ -6,8 +6,8 @@ via a ScriptedLLM that keeps asking to call a tool.
 
     uv run python examples/14_run_policy.py
 """
-from agentbuilder import Agent, RunLimitExceeded, RunPolicy, tool
-from agentbuilder.testing import ScriptedLLM
+from agentmaker import Agent, RunLimitExceeded, RunPolicy, tool
+from agentmaker.testing import ScriptedLLM
 
 
 @tool
